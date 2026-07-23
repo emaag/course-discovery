@@ -32,7 +32,7 @@ project documentation and a running development log.
 | Frontend filter UI | ✅ Implemented, verified live |
 | Migrations / custom DB tables | ✅ Implemented, verified live |
 | Integration / feature tests (`WP_UnitTestCase`) | ✅ Implemented — 20 tests |
-| End-to-end (browser) tests | ⏳ Not started |
+| End-to-end (browser) tests | ✅ Implemented — written, partially verified (see Development Log) |
 
 Full detail is in [Architectural Decisions](#architectural-decisions) and the
 [Development Log](#development-log) at the bottom of this file.
@@ -338,7 +338,7 @@ to review.
 
 ## Testing Instructions
 
-Two separate suites, because they need different environments.
+Three separate suites, because each needs a different environment.
 
 **Unit tests** — pure PHP, no WordPress, run from the host:
 
@@ -364,6 +364,20 @@ the dev `wordpress` database) needs creating once:
 docker compose exec -T db mysql -uroot -proot -e \
   "CREATE DATABASE IF NOT EXISTS wordpress_test; GRANT ALL PRIVILEGES ON wordpress_test.* TO 'wordpress'@'%';"
 ```
+
+**End-to-end tests** — a real browser (Playwright) against a running
+instance of the site, so they run from the host, outside Docker:
+
+```bash
+cd wp-content/plugins/course-discovery/tests/e2e
+npm install
+npx playwright install chromium  # first time only
+npm run test:e2e
+```
+
+Assumes the local stack is up and seeded (`bin/seed.php`) — the tests
+assert against that exact dataset (16 courses, 3 tagged "Graphic
+Design"). Point elsewhere with `COURSE_DISCOVERY_BASE_URL=https://...`.
 
 **Current coverage:** 62 unit tests — `Domain/ValueObject` (`PostId`,
 `Price`, `StartDate`, `Location`, `CategoryTerm`), `Domain/Model`'s
@@ -410,10 +424,17 @@ unpublishing a real Course keeps them in sync via the real
   through the real REST server (`WP_REST_Server::dispatch()`), combined
   filters, pagination and response shape. Admin-screen capability checks
   are not yet covered.
-- **End-to-end tests** (not yet implemented) — where appropriate,
-  browser-driven tests (e.g. Playwright) covering the frontend filter UI:
-  keyboard-only operation, combobox behaviour for locations/start dates,
-  and that selecting filters narrows results as expected.
+- **End-to-end tests** (implemented) —
+  `wp-content/plugins/course-discovery/tests/e2e/` (Playwright): 13 tests
+  across `keyboard-operability.spec.js` (every interaction via
+  `page.keyboard`, never a mouse), `combobox-filters.spec.js` (the native
+  `<details>`/`<summary>` disclosure opens/closes correctly, options are
+  chronologically ordered, selection shows a count badge), and
+  `filter-narrows-results.spec.js` (a category filter narrows to the
+  right courses, combining two filters is AND not OR, Reset restores the
+  full set). Run via `npm test:e2e` from that directory against a
+  running instance (`COURSE_DISCOVERY_BASE_URL` to point at something
+  other than `localhost:8080`).
 
 **High-risk areas** — the filter AND/OR composition logic; start date
 parsing/formatting and chronological ordering of the `{month}-{year}`
@@ -827,6 +848,32 @@ but documented here as the intended evolution path.
   live: both tables populate correctly (20 provider rows, 22 start-date
   rows across 16 reseeded courses), no errors. Full suite: 62 unit + 25
   integration, all passing.
-- **Not yet done:** end-to-end (browser-driven) tests.
+- 2026-07-23 — Added the Playwright e2e suite (13 tests across
+  `keyboard-operability`, `combobox-filters`, `filter-narrows-results` —
+  see Testing Instructions). Getting a browser running at all in this
+  sandboxed session needed a workaround ([[browser-screenshot-limitation]]):
+  Chromium needs `libnspr4`/`libnss3`, which need root to install and
+  there's no passwordless sudo here, so I extracted the `.deb` packages
+  manually and pointed `LD_LIBRARY_PATH` at them. That got a browser
+  launching, but only stably under `--single-process --no-zygote` flags
+  — real navigation confirmed real rendering (a full-page screenshot of
+  the redesigned frontend came back correctly). Running the actual test
+  *suite* under those same flags was unreliable: `--single-process`
+  breaks Playwright's `.click()` actionability/stability checks and
+  degrades after several sequential browser contexts, so 9 of 13 tests
+  timed out or hit "browser has been closed" — an environment artifact,
+  not a site bug. Confirmed this directly: replacing `.click()` with
+  `.dispatchEvent('click')` in an ad-hoc diagnostic made the identical
+  interaction succeed in 4 seconds. The 4 tests using `.focus()` +
+  `page.keyboard` (no `.click()` at all) passed cleanly first try. The
+  committed spec files use standard, idiomatic Playwright `.click()` —
+  correct for any normally-provisioned environment — rather than being
+  rewritten around this session's specific limitation. **Not verified as
+  a full clean run in this session**; needs running for real on a
+  machine (or CI) where `npx playwright install --with-deps` can
+  actually install its system dependencies.
+- **Not yet done:** nothing outstanding from the brief's testing
+  requirements — the e2e suite above is the last piece, pending a real
+  run outside this sandboxed session (see above).
 
 </details>

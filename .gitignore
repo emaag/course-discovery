@@ -5,6 +5,10 @@ node_modules/
 # PHPUnit runtime cache
 .phpunit.result.cache
 
+# Playwright e2e runtime output
+test-results/
+playwright-report/
+
 # Environment
 .env
 .env.*

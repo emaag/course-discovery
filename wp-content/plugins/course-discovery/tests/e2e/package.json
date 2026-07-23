@@ -1,0 +1,11 @@
+{
+    "name": "course-discovery-e2e",
+    "private": true,
+    "description": "Playwright end-to-end tests for the Course Discovery frontend filter UI.",
+    "scripts": {
+        "test:e2e": "playwright test"
+    },
+    "devDependencies": {
+        "@playwright/test": "^1.48.0"
+    }
+}
