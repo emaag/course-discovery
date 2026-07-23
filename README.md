@@ -249,6 +249,23 @@ docker compose down        # stop the stack
 docker compose logs -f     # tail logs
 ```
 
+Seeding dummy data (run from the repository root, needs the WordPress/ACF
+runtime, so it's run inside the container rather than via composer):
+
+```bash
+docker compose exec wordpress php wp-content/plugins/course-discovery/bin/seed.php
+```
+
+Creates a fixed, realistic set of Providers, Instructors, hierarchical
+Categories and Courses (varied prices, multiple/overlapping start dates,
+multi-provider courses to exercise the derived-Location logic). Safe to
+re-run — everything it creates is tagged with a `_course_discovery_seed`
+post meta flag and purged before reseeding, so it never touches other
+content and never accumulates duplicates. Regenerating content this way
+(rather than shipping a `.sql` dump) is intentional: the same command
+reproduces the same dataset on any environment, including the eventual
+public deployment, without transferring a database file.
+
 ## Testing Instructions
 
 The plugin uses PHPUnit for automated tests, run via:
@@ -473,8 +490,20 @@ but documented here as the intended evolution path.
   `acf_add_local_field_group` on ACF's `acf/init` hook, filterable via
   `course_discovery_field_groups`. Verified live: both field groups render
   on the real Course/Provider "Add New" admin screens, no PHP errors.
+- 2026-07-23 — Added `bin/seed.php`, a repeatable dummy-data seeder
+  (6 Providers, 8 Instructors, 9 Categories in a two-level hierarchy, 16
+  Courses with varied prices/dates/multi-provider locations), tagged and
+  purge-before-reseed for idempotency. Verified end-to-end by reading
+  seeded Courses back through `Domain\Model\Course::fromPost()` — derived
+  multi-location logic, price formatting and chronological start dates all
+  correct. Also discovered and fixed a pre-existing issue: permalinks were
+  left on WordPress's default "Plain" structure from install, so the
+  `course`/`instructor`/`provider` archive URLs 404'd; set
+  `/%postname%/` and saved via Permalinks settings (flushing rewrite
+  rules from CLI didn't write `.htaccess` reliably — doing it through the
+  real admin form did).
 - **Not yet done:** the query builder, the filter pipeline and hook
-  system, REST endpoints, frontend UI, migrations/custom DB tables, seed/
-  dummy data, and integration/feature/e2e tests.
+  system, REST endpoints, frontend UI, migrations/custom DB tables, and
+  integration/feature/e2e tests.
 
 </details>
