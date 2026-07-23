@@ -17,18 +17,24 @@ use WP_Query;
  */
 final class CourseSearchClause
 {
-    private static bool $registered = false;
-
+    /**
+     * Always (re-)registers rather than guarding with a "have we already
+     * registered" static flag: WordPress's add_filter() already dedupes
+     * identical callback+priority registrations (no double-execution
+     * risk), and a one-time guard breaks under test frameworks that
+     * snapshot/restore the hooks table between tests (e.g.
+     * WP_UnitTestCase) — the guard would skip re-registering after the
+     * table's been reset, silently disabling this filter for every test
+     * after the first.
+     */
     public static function registerHooks(): void
     {
-        if (self::$registered || ! function_exists('add_filter')) {
+        if (! function_exists('add_filter')) {
             return;
         }
 
         add_filter('posts_join', [self::class, 'join'], 10, 2);
         add_filter('posts_where', [self::class, 'where'], 10, 2);
-
-        self::$registered = true;
     }
 
     public static function join(string $join, WP_Query $query): string

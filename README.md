@@ -31,7 +31,8 @@ project documentation and a running development log.
 | REST endpoint (`course-discovery/v1/courses`, `/filters`) | ✅ Implemented, verified live |
 | Frontend filter UI | ✅ Implemented, verified live |
 | Migrations / custom DB tables | ⏳ Not started |
-| Integration / feature / e2e tests | ⏳ Not started |
+| Integration / feature tests (`WP_UnitTestCase`) | ✅ Implemented — 20 tests |
+| End-to-end (browser) tests | ⏳ Not started |
 
 Full detail is in [Architectural Decisions](#architectural-decisions) and the
 [Development Log](#development-log) at the bottom of this file.
@@ -257,6 +258,11 @@ using the credentials below (development only — do not reuse in production):
 phpMyAdmin is available at `http://localhost:8081` for inspecting the
 database directly.
 
+A second database, `wordpress_test`, holds the integration test suite's
+data — kept separate from `wordpress` so running tests never touches dev
+content. See [Testing Instructions](#testing-instructions) for the
+one-time creation command.
+
 ### Retrieving credentials from Docker
 
 The values above are also set as plain environment variables on the running
@@ -332,10 +338,31 @@ to review.
 
 ## Testing Instructions
 
-The plugin uses PHPUnit for automated tests, run via:
+Two separate suites, because they need different environments.
+
+**Unit tests** — pure PHP, no WordPress, run from the host:
 
 ```bash
 composer test
+```
+
+**Integration tests** — need a real WordPress bootstrap (`WP_UnitTestCase`,
+real `WP_Query`/ACF/REST dispatch), so they run inside the container
+against a dedicated test database:
+
+```bash
+docker compose exec wordpress php wp-content/plugins/course-discovery/vendor/bin/phpunit \
+  -c wp-content/plugins/course-discovery/phpunit-integration.xml.dist
+```
+
+(`composer test:integration` runs the same command, but only works when
+run from inside the container for the same ABSPATH/DB-host reasons.) The
+test database (`wordpress_test` on the same `db` service, separate from
+the dev `wordpress` database) needs creating once:
+
+```bash
+docker compose exec -T db mysql -uroot -proot -e \
+  "CREATE DATABASE IF NOT EXISTS wordpress_test; GRANT ALL PRIVILEGES ON wordpress_test.* TO 'wordpress'@'%';"
 ```
 
 **Current coverage:** 59 unit tests — `Domain/ValueObject` (`PostId`,
@@ -344,35 +371,45 @@ composer test
 every concrete `Filter`'s contribution to the query builder, the
 `FilterPipeline`'s end-to-end AND/OR composition,
 `Query\CourseResultAssembler`'s filter/pagination math, and
-`REST\CourseTransformer`'s Course→JSON conversion. All run with no
-WordPress bootstrap — including the filter/query/transformer logic, since
-predicates and serialisation are tested against fabricated `Course`
-objects rather than a live `WP_Query`/`WP_REST_Request`. The REST
-controllers themselves (`register()`/`handle()`, which do need `WP_Query`
-and the REST request/response classes) are verified live against the
-running site instead — see the Development Log — which is exactly the
-integration tier described below; genuine `WP_UnitTestCase`-based
-integration tests are the next step to formalise that.
+`REST\CourseTransformer`'s Course→JSON conversion — all with no WordPress
+bootstrap, since predicates and serialisation are tested against
+fabricated `Course` objects.
 
-### Strategy (planned)
+Plus **20 integration tests** (`wp-phpunit` + `yoast/phpunit-polyfills`,
+against the plugin's own real WordPress install) across four suites:
+`FilterPipelineIntegrationTest` (the brief's AND/OR composition against
+real posts/ACF data — the highest-risk area), `CourseQueryBuilderIntegrationTest`
+(search across all three text fields, real `tax_query` behaviour
+including child-term inclusion, pagination math against a real result
+set, ACF hydration end to end), `RestEndpointIntegrationTest` (the actual
+registered routes dispatched through `WP_REST_Server`, not just direct
+PHP calls), and `StartDateFilterIntegrationTest` (chronological ordering
+and single/multi start-date filtering).
+
+### Strategy
 
 - **Unit tests** — value objects (e.g. price, start date, slug wrappers) and
   individual `Filter` implementations tested in isolation, no WordPress
   bootstrap required. This is where filter *logic* correctness (AND/OR
   composition, edge cases like an empty selection or an unknown value) is
   covered cheaply and fast.
-- **Integration tests** — filters and the query builder tested against a
-  real WordPress test database (`WP_UnitTestCase` / wp-phpunit), asserting
-  the actual `WP_Query`/SQL produced against seeded Course/Instructor/
-  Provider fixtures. This is the layer that catches WordPress-specific
-  surprises (meta query quirks, taxonomy joins) that unit tests can't see.
-- **Feature tests** — exercise a full filter request end-to-end against the
-  REST endpoint (multiple filters combined, pagination, ordering) and admin
-  screens (post type registration, capability checks).
-- **End-to-end tests** — where appropriate, browser-driven tests (e.g.
-  Playwright) covering the frontend filter UI: keyboard-only operation,
-  combobox behaviour for locations/start dates, and that selecting filters
-  narrows results as expected.
+- **Integration tests** (implemented) — filters and the query builder
+  tested against a real WordPress test database (`WP_UnitTestCase` /
+  wp-phpunit), asserting actual results from real `WP_Query`/`tax_query`/
+  ACF data, each test creating its own fixtures rather than relying on
+  `bin/seed.php`'s data. This is the layer that catches WordPress-specific
+  surprises (meta query quirks, taxonomy joins) unit tests can't see — and
+  it already has: see the `CourseSearchClause` incident in the
+  Development Log below, found by exactly this suite.
+- **Feature tests** (implemented, folded into the integration suite) —
+  `RestEndpointIntegrationTest` exercises full filter requests end-to-end
+  through the real REST server (`WP_REST_Server::dispatch()`), combined
+  filters, pagination and response shape. Admin-screen capability checks
+  are not yet covered.
+- **End-to-end tests** (not yet implemented) — where appropriate,
+  browser-driven tests (e.g. Playwright) covering the frontend filter UI:
+  keyboard-only operation, combobox behaviour for locations/start dates,
+  and that selecting filters narrows results as expected.
 
 **High-risk areas** — the filter AND/OR composition logic; start date
 parsing/formatting and chronological ordering of the `{month}-{year}`
@@ -726,9 +763,27 @@ but documented here as the intended evolution path.
   duplicate. Verified locally: `/` renders the listing, `/courses/`
   redirects correctly, filtering still works at the new URL, full suite
   still 59/59.
-- **Not yet done:** migrations/custom DB tables, and integration/
-  feature/e2e tests (formal `WP_UnitTestCase`-based ones — the REST and
-  frontend layers have been verified live, but not yet as an automated
-  suite).
+- 2026-07-23 — Added the formal integration test suite: `wp-phpunit` +
+  `yoast/phpunit-polyfills`, bootstrapped against the plugin's own real
+  WordPress install (inside the container) and a dedicated
+  `wordpress_test` database. 20 tests across `FilterPipelineIntegrationTest`,
+  `CourseQueryBuilderIntegrationTest`, `RestEndpointIntegrationTest` and
+  `StartDateFilterIntegrationTest`, each creating its own fixtures.
+  Downgraded PHPUnit from 10 to 9.6 project-wide — `wp-phpunit` 7.0.2
+  calls a `PHPUnit\Util\Test` method PHPUnit 10 removed, and 9.6 is what
+  the wp-phpunit/polyfills combination actually supports; the existing
+  59 unit tests needed no changes and still pass.
+  **Found and fixed a real bug in the process:** `CourseSearchClause`
+  guarded its `add_filter()` calls with a "register once" static flag,
+  correct for a normal request but wrong under `WP_UnitTestCase`, which
+  snapshots and restores the hooks table between every test — after the
+  first test registered the filter, the guard silently skipped
+  re-registering it once the table was reset, so the search-widening
+  filter quietly stopped working for every test after the first. Removed
+  the guard (WordPress's `add_filter()` already dedupes identical
+  callback+priority registrations, so there's no double-execution risk).
+  Full suite: 59 unit + 20 integration, all passing.
+- **Not yet done:** migrations/custom DB tables, and end-to-end
+  (browser-driven) tests.
 
 </details>
