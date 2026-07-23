@@ -239,12 +239,50 @@ docker compose logs -f     # tail logs
 
 ## Testing
 
-The plugin uses PHPUnit for automated tests. Tests live in
-`wp-content/plugins/course-discovery/tests/` and are run via:
+The plugin uses PHPUnit for automated tests, run via:
 
 ```bash
 composer test
 ```
+
+### Strategy (planned)
+
+- **Unit tests** — value objects (e.g. price, start date, slug wrappers) and
+  individual `Filter` implementations tested in isolation, no WordPress
+  bootstrap required. This is where filter *logic* correctness (AND/OR
+  composition, edge cases like an empty selection or an unknown value) is
+  covered cheaply and fast.
+- **Integration tests** — filters and the query builder tested against a
+  real WordPress test database (`WP_UnitTestCase` / wp-phpunit), asserting
+  the actual `WP_Query`/SQL produced against seeded Course/Instructor/
+  Provider fixtures. This is the layer that catches WordPress-specific
+  surprises (meta query quirks, taxonomy joins) that unit tests can't see.
+- **Feature tests** — exercise a full filter request end-to-end against the
+  REST endpoint (multiple filters combined, pagination, ordering) and admin
+  screens (post type registration, capability checks).
+- **End-to-end tests** — where appropriate, browser-driven tests (e.g.
+  Playwright) covering the frontend filter UI: keyboard-only operation,
+  combobox behaviour for locations/start dates, and that selecting filters
+  narrows results as expected.
+
+**High-risk areas** — the filter AND/OR composition logic; start date
+parsing/formatting and chronological ordering of the `{month}-{year}`
+combobox; the derived Location-from-Provider relationship; and any custom
+SQL in lookup tables (highest regression risk since it bypasses WP_Query's
+own testing surface).
+
+**Regression prevention** — each `Filter` implementation ships with a fixed
+fixture set (known Courses/Providers/Locations) and a table of
+input-selection → expected-result-IDs cases, run in CI on every change.
+Query-shape assertions (not just result counts) are used for the filters
+most likely to regress silently, since a wrong-but-similar SQL join can
+still return plausible-looking results.
+
+**Testing new filters** — because filters implement a shared
+`Filter` contract (see Architecture below), a generic contract test suite
+runs against every registered filter implementation, so a new filter is
+exercised the same way as existing ones without hand-writing bespoke
+plumbing each time; only its fixture data and expected cases need adding.
 
 ## Architecture
 
@@ -252,17 +290,116 @@ The plugin follows a namespaced, PSR-4 structure under
 `OxfordInternational\CourseDiscovery`:
 
 - `Plugin.php` — bootstraps the plugin and wires up WordPress hooks.
-- `Domain/Model` — domain entities.
-- `Domain/ValueObject` — immutable value objects used by the domain model.
-- `Query` — read-side query objects for retrieving courses.
-- `Filter` — filtering logic applied to course queries.
-- `PostType` — custom post type registrations.
-- `Taxonomy` — custom taxonomy registrations.
-- `Migration` — database/schema migration runners.
-- `REST` — REST API controllers/routes.
+- `Domain/Model` — domain entities (`Course`, `Instructor`, `Provider`)
+  hydrated from `WP_Post` + ACF field data, not raw arrays.
+- `Domain/ValueObject` — immutable value objects (e.g. `Price`, `StartDate`,
+  a `PostId`/slug wrapper) so primitives never leak into the domain layer.
+- `Query` — a `WP_Query` abstraction (`CourseQuery`/`CourseQueryBuilder`)
+  that exposes a typed, fluent API instead of passing `WP_Query` arg arrays
+  around directly.
+- `Filter` — one class per filter (search, provider, location, start date,
+  category), each implementing a shared `Filter` interface with a method to
+  contribute to the query builder given selected criteria.
+- `PostType` — custom post type registrations (`course`, `instructor`,
+  `provider`).
+- `Taxonomy` — custom taxonomy registrations (hierarchical `course_category`).
+- `Migration` — versioned schema/data migration runners for any custom
+  tables (e.g. a course/provider/location lookup table).
+- `REST` — REST controllers exposing course search/filtering to the
+  frontend.
 
 The theme (`course-discovery-theme`) is intentionally minimal and exists to
 provide a rendering surface for the plugin during development.
+
+### Design decisions
+
+- **Composition over inheritance.** Filters are separate, independently
+  testable classes composed by a `FilterPipeline`/registry rather than
+  built as subclasses of a base "filter" class. Each filter only needs to
+  know how to (a) describe its own available options and (b) contribute
+  its criteria to a query builder — nothing else depends on its internals.
+- **Specification-style composition for AND/OR grouping.** Selected filter
+  values are modelled as a small composite of value-object criteria: values
+  *within* one filter are combined with OR, and the filters themselves are
+  combined with AND, mirroring the brief's example
+  `(provider = A OR provider = B) AND (location = X OR location = Y)`. This
+  composition lives in one place (the query builder) rather than being
+  reimplemented per filter, so it can't drift between filter types.
+- **Hook/event pipeline for extensibility.** Rather than a fixed filter
+  list, filters register themselves against a `Filter` registry via a
+  WordPress action (e.g. `course_discovery_register_filters`), and the
+  query builder fires WordPress filters at key extension points — altering
+  available filter options, mutating query args before execution,
+  transforming raw search criteria, and customising result ordering. New
+  filters are addable by third-party code hooking in, with no changes to
+  existing filter classes.
+- **`WP_Query` abstraction.** Domain code never builds raw `WP_Query` arg
+  arrays inline; a query builder translates typed filter criteria into
+  `WP_Query`/`WP_Meta_Query`/`WP_Tax_Query` arguments in one place, which is
+  also what integration tests assert against.
+- **Value objects over primitives.** e.g. price is a `Price` value object
+  (not a bare float) so currency/formatting/future range support has one
+  home; start dates are a `StartDate` value object that knows how to
+  format/compare/sort chronologically, rather than passing month/year
+  strings around and re-parsing them wherever ordering is needed.
+- **Locations as derived, not stored.** Since Location is derived from
+  Provider, it's computed/read from the Provider relationship rather than
+  duplicated as its own Course meta field, avoiding a second source of
+  truth that could drift.
+- **ACF for field storage, domain layer for meaning.** ACF is used purely
+  as the admin data-entry/storage mechanism (the only allowed external
+  plugin); all business logic and typed access goes through the
+  `Domain/Model` and `Domain/ValueObject` layer so the rest of the codebase
+  never touches `get_field()` calls directly.
+
+## Performance & Scalability
+
+Not implemented for this exercise (explicitly out of scope per the brief),
+but documented here as the intended evolution path.
+
+- **Expected bottlenecks.** `WP_Query` with multiple `meta_query`/
+  `tax_query` clauses generates multi-way `JOIN`s against `wp_postmeta`,
+  which is an EAV-style table (`meta_key`/`meta_value` as `LONGTEXT`) — this
+  degrades fast as course count and filter combinations grow, well before
+  the low hundreds-of-thousands mark.
+- **Meta query limitations.** `wp_postmeta.meta_value` isn't indexed for
+  range/equality comparisons beyond a shared `meta_key` index; ACF
+  relationship/repeater fields are stored as serialized/CSV-ish meta,
+  meaning provider/instructor relationships often require `LIKE '%id%'`
+  matching rather than a real indexed join — this is the single biggest
+  scaling risk for the Provider/Instructor/Category filters.
+- **Indexing considerations.** Beyond WordPress's default indexes, a
+  dedicated lookup/pivot table (e.g. `course_filter_index` with proper
+  foreign keys and composite indexes on `(provider_id)`, `(location_id)`,
+  `(category_id)`, `(start_date)`) would let filtering happen via indexed
+  `JOIN`s instead of meta-value scans.
+- **Query performance.** Favour a small number of well-indexed joins over
+  compounding `meta_query` clauses; keep the query builder's output
+  inspectable/loggable so slow filter combinations are easy to spot in
+  development.
+- **Caching opportunities.** Filter *option lists* (available providers,
+  locations, start dates, categories) change far less often than course
+  data and are prime candidates for object cache/transient caching;
+  popular/common filter-result sets can also be cached with an
+  invalidation hook on course save/delete.
+- **Pagination strategy.** Offset-based pagination (`WP_Query`'s default)
+  is adequate at moderate scale; at high volume, cursor/keyset pagination
+  (ordering by an indexed, unique column) avoids the increasing cost of
+  large `OFFSET`s.
+- **Search optimisation.** Plain-text search across name/short/long
+  description via `WP_Query`'s default `s` parameter uses `LIKE` matching
+  and doesn't scale or rank well. A MySQL `FULLTEXT` index on those columns
+  (via a denormalised read table, since core WP post tables aren't set up
+  for it) is a reasonable mid-scale step.
+- **Evolution path.** Roughly: (1) current — `WP_Query` + meta/tax queries,
+  fine at low volume; (2) introduce a denormalised `course_filter_index`
+  lookup table kept in sync via save/delete hooks, once meta-query joins
+  show up as slow; (3) add caching around option lists and common filter
+  results; (4) once full-text relevance/ranking or facet counts at scale
+  become necessary (hundreds of thousands to millions of courses), move
+  search to an external engine (e.g. Elasticsearch/OpenSearch or Algolia),
+  with WordPress remaining the system of record and the search index kept
+  eventually consistent via the same save/delete hooks.
 
 ## Assumptions
 
