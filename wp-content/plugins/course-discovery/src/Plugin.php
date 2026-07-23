@@ -4,6 +4,13 @@ declare(strict_types=1);
 
 namespace OxfordInternational\CourseDiscovery;
 
+use OxfordInternational\CourseDiscovery\PostType\CoursePostType;
+use OxfordInternational\CourseDiscovery\PostType\InstructorPostType;
+use OxfordInternational\CourseDiscovery\PostType\PostTypeRegistrar;
+use OxfordInternational\CourseDiscovery\PostType\ProviderPostType;
+use OxfordInternational\CourseDiscovery\Taxonomy\CourseCategoryTaxonomy;
+use OxfordInternational\CourseDiscovery\Taxonomy\TaxonomyRegistrar;
+
 final class Plugin
 {
     private static ?self $instance = null;
@@ -27,12 +34,35 @@ final class Plugin
 
     public function registerPostTypes(): void
     {
-        // Post type registrations live in src/PostType.
+        /**
+         * Third parties can add/remove post types here without touching
+         * this class or any existing registrar.
+         *
+         * @param list<PostTypeRegistrar> $registrars
+         */
+        $registrars = apply_filters('course_discovery_post_types', [
+            new CoursePostType(),
+            new InstructorPostType(),
+            new ProviderPostType(),
+        ]);
+
+        foreach ($registrars as $registrar) {
+            $registrar->register();
+        }
     }
 
     public function registerTaxonomies(): void
     {
-        // Taxonomy registrations live in src/Taxonomy.
+        /**
+         * @param list<TaxonomyRegistrar> $registrars
+         */
+        $registrars = apply_filters('course_discovery_taxonomies', [
+            new CourseCategoryTaxonomy(),
+        ]);
+
+        foreach ($registrars as $registrar) {
+            $registrar->register();
+        }
     }
 
     public function registerRestRoutes(): void

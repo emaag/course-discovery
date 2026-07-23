@@ -253,6 +253,13 @@ The plugin uses PHPUnit for automated tests, run via:
 composer test
 ```
 
+**Current coverage:** 30 unit tests over `Domain/ValueObject` (`PostId`,
+`Price`, `StartDate`, `Location`, `CategoryTerm`) and `Domain/Model`'s
+`Course::locations()` derivation logic — all run with no WordPress
+bootstrap, since the value objects and the tested model logic have no WP
+dependency. Integration, feature and e2e tests (below) land once the query
+builder, filter pipeline and REST endpoint exist to test against.
+
 ### Strategy (planned)
 
 - **Unit tests** — value objects (e.g. price, start date, slug wrappers) and
@@ -297,17 +304,23 @@ plumbing each time; only its fixture data and expected cases need adding.
 The plugin follows a namespaced, PSR-4 structure under
 `OxfordInternational\CourseDiscovery`:
 
-| Namespace           | Responsibility |
-|---------------------|----------------|
-| `Plugin.php`         | Bootstraps the plugin and wires up WordPress hooks. |
-| `Domain/Model`       | Domain entities (`Course`, `Instructor`, `Provider`) hydrated from `WP_Post` + ACF field data, not raw arrays. |
-| `Domain/ValueObject` | Immutable value objects (e.g. `Price`, `StartDate`, a `PostId`/slug wrapper) so primitives never leak into the domain layer. |
-| `Query`              | A `WP_Query` abstraction (`CourseQuery`/`CourseQueryBuilder`) exposing a typed, fluent API instead of passing `WP_Query` arg arrays around directly. |
-| `Filter`             | One class per filter (search, provider, location, start date, category), each implementing a shared `Filter` interface with a method to contribute to the query builder given selected criteria. |
-| `PostType`           | Custom post type registrations (`course`, `instructor`, `provider`). |
-| `Taxonomy`           | Custom taxonomy registrations (hierarchical `course_category`). |
-| `Migration`          | Versioned schema/data migration runners for any custom tables (e.g. a course/provider/location lookup table). |
-| `REST`               | REST controllers exposing course search/filtering to the frontend. |
+| Namespace           | Responsibility | Status |
+|---------------------|----------------|--------|
+| `Plugin.php`         | Bootstraps the plugin and wires up WordPress hooks. | ✅ Implemented |
+| `Domain/Model`       | Domain entities (`Course`, `Instructor`, `Provider`) hydrated from `WP_Post` + ACF field data, not raw arrays. | ✅ Implemented |
+| `Domain/ValueObject` | Immutable value objects (`Price`, `StartDate`, `PostId`, `Location`, `CategoryTerm`) so primitives never leak into the domain layer. | ✅ Implemented |
+| `PostType`           | Custom post type registrations (`course`, `instructor`, `provider`), each behind a `PostTypeRegistrar` interface and filterable via `course_discovery_post_types`. | ✅ Implemented |
+| `Taxonomy`           | Custom taxonomy registrations (hierarchical `course_category`), behind a `TaxonomyRegistrar` interface and filterable via `course_discovery_taxonomies`. | ✅ Implemented |
+| `Query`              | A `WP_Query` abstraction (`CourseQuery`/`CourseQueryBuilder`) exposing a typed, fluent API instead of passing `WP_Query` arg arrays around directly. | ⏳ Planned |
+| `Filter`             | One class per filter (search, provider, location, start date, category), each implementing a shared `Filter` interface with a method to contribute to the query builder given selected criteria. | ⏳ Planned |
+| `Migration`          | Versioned schema/data migration runners for any custom tables (e.g. a course/provider/location lookup table). | ⏳ Planned |
+| `REST`               | REST controllers exposing course search/filtering to the frontend. | ⏳ Planned |
+
+ACF field groups (the `short_description`, `price`, `instructors`,
+`providers` and `start_dates` fields the Domain/Model layer expects — see
+the docblock on `Course::fromPost()`) are not registered yet, so those
+fields won't appear on the Course/Instructor/Provider edit screens until
+that lands.
 
 The theme (`course-discovery-theme`) is intentionally minimal and exists to
 provide a rendering surface for the plugin during development.
@@ -436,9 +449,20 @@ but documented here as the intended evolution path.
   **Course Discovery** plugin and **Course Discovery Theme** activated;
   front end verified rendering under the new theme with no PHP errors in
   the container logs.
-- **Not yet done:** Course/Instructor/Provider post types, ACF field groups,
-  taxonomies, the filter pipeline and hook system, REST endpoints, frontend
-  UI, migrations/custom DB tables, and the test suite (unit/integration/
-  feature/e2e).
+- 2026-07-23 — Domain layer implemented: `Domain/ValueObject` (`PostId`,
+  `Price`, `StartDate`, `Location`, `CategoryTerm`) and `Domain/Model`
+  (`Course`, `Instructor`, `Provider`), with `Course::locations()` deriving
+  and de-duplicating locations from its Providers. 30 unit tests added,
+  all passing with no WordPress bootstrap required.
+- 2026-07-23 — `course`, `instructor` and `provider` post types and the
+  hierarchical `course_category` taxonomy registered, each behind a
+  `PostTypeRegistrar`/`TaxonomyRegistrar` interface and filterable
+  (`course_discovery_post_types`/`course_discovery_taxonomies`) so new
+  post types/taxonomies can be added by a third party without editing
+  `Plugin.php`. Verified live: admin screens load, `post_type_exists()`/
+  `taxonomy_exists()` all return true, no PHP errors.
+- **Not yet done:** ACF field groups, the query builder, the filter
+  pipeline and hook system, REST endpoints, frontend UI, migrations/custom
+  DB tables, and integration/feature/e2e tests.
 
 </details>
