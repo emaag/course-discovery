@@ -24,12 +24,18 @@ use OxfordInternational\CourseDiscovery\Domain\Model\Course;
 final class CourseResultAssembler
 {
     /**
-     * @param list<Course>                 $courses  Already in the desired final order.
+     * Applies every predicate (AND across predicates; any OR-within-a-
+     * filter logic is baked into each predicate by its Filter) without
+     * pagination — used directly by callers that need the whole matching
+     * set (e.g. deriving available filter options).
+     *
+     * @param list<Course>                 $courses
      * @param list<callable(Course): bool> $predicates
+     * @return list<Course>
      */
-    public function assemble(array $courses, array $predicates, int $page, int $perPage): CourseQueryResult
+    public function filter(array $courses, array $predicates): array
     {
-        $filtered = array_values(array_filter(
+        return array_values(array_filter(
             $courses,
             static function (Course $course) use ($predicates): bool {
                 foreach ($predicates as $predicate) {
@@ -41,6 +47,15 @@ final class CourseResultAssembler
                 return true;
             },
         ));
+    }
+
+    /**
+     * @param list<Course>                 $courses  Already in the desired final order.
+     * @param list<callable(Course): bool> $predicates
+     */
+    public function assemble(array $courses, array $predicates, int $page, int $perPage): CourseQueryResult
+    {
+        $filtered = $this->filter($courses, $predicates);
 
         $total = count($filtered);
         $perPage = max(1, $perPage);

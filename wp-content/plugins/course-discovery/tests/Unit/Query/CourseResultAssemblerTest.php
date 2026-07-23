@@ -11,6 +11,31 @@ use PHPUnit\Framework\TestCase;
 
 final class CourseResultAssemblerTest extends TestCase
 {
+    public function test_filter_applies_predicates_without_pagination(): void
+    {
+        $courses = [
+            CourseFactory::make(['id' => 1, 'providerIds' => [5]]),
+            CourseFactory::make(['id' => 2, 'providerIds' => [9]]),
+            CourseFactory::make(['id' => 3, 'providerIds' => [5]]),
+        ];
+
+        $providerIs5 = static fn (Course $c): bool => in_array(5, array_map(
+            static fn ($p) => $p->id()->toInt(),
+            $c->providers(),
+        ), true);
+
+        $filtered = (new CourseResultAssembler())->filter($courses, [$providerIs5]);
+
+        self::assertSame([1, 3], array_map(static fn (Course $c): int => $c->id()->toInt(), $filtered));
+    }
+
+    public function test_filter_with_no_predicates_returns_every_course_unpaginated(): void
+    {
+        $courses = array_map(static fn (int $id): Course => CourseFactory::make(['id' => $id]), range(1, 15));
+
+        self::assertCount(15, (new CourseResultAssembler())->filter($courses, []));
+    }
+
     public function test_predicates_are_combined_with_and(): void
     {
         $courses = [

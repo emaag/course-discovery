@@ -11,6 +11,9 @@ use OxfordInternational\CourseDiscovery\PostType\CoursePostType;
 use OxfordInternational\CourseDiscovery\PostType\InstructorPostType;
 use OxfordInternational\CourseDiscovery\PostType\PostTypeRegistrar;
 use OxfordInternational\CourseDiscovery\PostType\ProviderPostType;
+use OxfordInternational\CourseDiscovery\REST\CourseSearchController;
+use OxfordInternational\CourseDiscovery\REST\FilterOptionsController;
+use OxfordInternational\CourseDiscovery\REST\RestController;
 use OxfordInternational\CourseDiscovery\Taxonomy\CourseCategoryTaxonomy;
 use OxfordInternational\CourseDiscovery\Taxonomy\TaxonomyRegistrar;
 
@@ -90,7 +93,17 @@ final class Plugin
 
     public function registerRestRoutes(): void
     {
-        // REST controllers live in src/REST.
+        /**
+         * @param list<RestController> $controllers
+         */
+        $controllers = apply_filters('course_discovery_rest_controllers', [
+            new CourseSearchController(),
+            new FilterOptionsController(),
+        ]);
+
+        foreach ($controllers as $controller) {
+            $controller->register();
+        }
     }
 
     public function runMigrations(): void

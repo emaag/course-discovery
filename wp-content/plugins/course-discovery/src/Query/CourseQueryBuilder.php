@@ -93,6 +93,29 @@ final class CourseQueryBuilder
 
     public function execute(): CourseQueryResult
     {
+        return (new CourseResultAssembler())->assemble(
+            $this->fetchOrderedCourses(),
+            $this->postFilterPredicates,
+            $this->page,
+            $this->perPage,
+        );
+    }
+
+    /**
+     * Every course matching this builder's criteria, in final order,
+     * unpaginated — for callers that need the whole matching set (e.g.
+     * deriving available filter options) rather than one page of results.
+     *
+     * @return list<Course>
+     */
+    public function executeAll(): array
+    {
+        return (new CourseResultAssembler())->filter($this->fetchOrderedCourses(), $this->postFilterPredicates);
+    }
+
+    /** @return list<Course> */
+    private function fetchOrderedCourses(): array
+    {
         CourseSearchClause::registerHooks();
 
         $args = [
@@ -134,13 +157,6 @@ final class CourseQueryBuilder
          *
          * @param list<Course> $courses
          */
-        $courses = apply_filters('course_discovery_order_courses', $courses);
-
-        return (new CourseResultAssembler())->assemble(
-            $courses,
-            $this->postFilterPredicates,
-            $this->page,
-            $this->perPage,
-        );
+        return apply_filters('course_discovery_order_courses', $courses);
     }
 }
