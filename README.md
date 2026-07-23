@@ -2,7 +2,7 @@
 
 **A domain-modelled course search & filtering system, built as a WordPress plugin.**
 
-![WordPress](https://img.shields.io/badge/WordPress-6.7-21759B?logo=wordpress&logoColor=white)
+![WordPress](https://img.shields.io/badge/WordPress-7.0.2-21759B?logo=wordpress&logoColor=white)
 ![PHP](https://img.shields.io/badge/PHP-8.2%2B-777BB4?logo=php&logoColor=white)
 ![MySQL](https://img.shields.io/badge/MySQL-8.0-4479A1?logo=mysql&logoColor=white)
 ![Docker Compose](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)
@@ -17,6 +17,21 @@ for the reasoning.
 This is a pre-interview technical exercise for Oxford International. The
 verbatim task brief is preserved below for reference, followed by the
 project documentation and a running development log.
+
+### Status at a glance
+
+| Layer | State |
+|-------|-------|
+| Domain model (value objects + `Course`/`Instructor`/`Provider`) | ✅ Implemented, 30 unit tests passing |
+| Post types, taxonomy, ACF field groups | ✅ Implemented, verified live |
+| Dummy data seeder (`bin/seed.php`) | ✅ Implemented |
+| Query builder, filter pipeline, REST endpoint | ⏳ Not started |
+| Frontend filter UI | ⏳ Not started |
+| Migrations / custom DB tables | ⏳ Not started |
+| Integration / feature / e2e tests | ⏳ Not started |
+
+Full detail is in [Architectural Decisions](#architectural-decisions) and the
+[Development Log](#development-log) at the bottom of this file.
 
 <details>
 <summary><strong>Task Brief</strong> (reproduced verbatim from the exercise instructions — click to expand)</summary>
@@ -174,6 +189,17 @@ technologies.
 
 3. Visit **http://localhost:8080/wp-admin/install.php** and complete the
    WordPress install wizard (site title, admin username/password/email).
+   **Choose and note down your own admin credentials here** — the official
+   WordPress Docker image has no environment variable to pre-seed or later
+   recover the admin password (unlike the database credentials, see
+   [Retrieving credentials from Docker](#retrieving-credentials-from-docker)
+   below), so this is the only point they're set. If you forget them, either
+   use wp-admin's "Lost your password?" link (needs outbound email/SMTP,
+   not configured by default in this stack) or just start over —
+   `docker compose down -v && docker compose up -d` followed by this same
+   install step and `bin/seed.php` (see
+   [Development Commands](#development-commands)) reproduces the whole
+   environment from scratch in a couple of minutes.
 4. Log in to `/wp-admin/` and activate:
    - **Plugins → Course Discovery**
    - **Appearance → Themes → Course Discovery Theme**
@@ -193,12 +219,13 @@ technologies.
 
 ## Environment Requirements
 
-- Docker and Docker Compose
-- PHP 8.2+ (matches the `wordpress:6.7-php8.2-apache` image, and required by
-  the plugin's `composer.json`)
-- Composer (for installing plugin dependencies)
-- WordPress 6.7
-- MySQL 8.0
+| Requirement | Version | Notes |
+|--------------|---------|-------|
+| Docker & Docker Compose | — | Only host-side dependency needed to run the stack. |
+| WordPress | 7.0.2 | Pinned via the `wordpress:7.0.2-php8.2-apache` image in `docker-compose.yml`. |
+| PHP | 8.2+ | Matches the pinned image tag and the plugin's `composer.json` (`"php": ">=8.2"`). WordPress 7.0 itself recommends PHP 8.3+, but 8.2 remains supported — the image is pinned to 8.2 for now since that's what the plugin targets. |
+| MySQL | 8.0 | Provisioned by the `db` service. |
+| Composer | 2.x | Only needed on the host to install plugin dependencies and run tests (`wp-content/plugins/course-discovery/`) — not required inside the container. |
 
 ## Database Setup
 
@@ -215,6 +242,22 @@ using the credentials below (development only — do not reuse in production):
 
 phpMyAdmin is available at `http://localhost:8081` for inspecting the
 database directly.
+
+### Retrieving credentials from Docker
+
+The values above are also set as plain environment variables on the running
+containers (development only — never do this for real secrets), so they can
+be read directly from Docker instead of trusting this table stays in sync
+with `docker-compose.yml`:
+
+```bash
+docker compose exec wordpress printenv | grep WORDPRESS_DB_   # DB host/user/password/name, as WordPress sees them
+docker compose exec db printenv | grep MYSQL_                # MySQL root/user/password/database, as the db container sees them
+```
+
+There's no equivalent lookup for the **WordPress admin** username/password —
+see the note in [Setup Instructions](#setup-instructions) step 3, since the
+official image doesn't expose those as environment variables.
 
 ### Importing a dump
 
@@ -441,7 +484,7 @@ but documented here as the intended evolution path.
 
 - Local development only; the Docker Compose file and credentials in this
   repo are not intended for production use.
-- The plugin targets PHP 8.2+ and WordPress 6.7+; no support for older
+- The plugin targets PHP 8.2+ and WordPress 7.0+; no support for older
   versions is assumed.
 - Domain logic lives in the plugin, not the theme; the theme is a thin
   presentation layer.
@@ -502,6 +545,17 @@ but documented here as the intended evolution path.
   `/%postname%/` and saved via Permalinks settings (flushing rewrite
   rules from CLI didn't write `.htaccess` reliably — doing it through the
   real admin form did).
+- 2026-07-23 — Upgraded the stack from WordPress 6.7 to **7.0.2**
+  (`wordpress:7.0.2-php8.2-apache`). Since the environment is fully
+  reproducible (scripted install + `bin/seed.php`), the whole stack was
+  reprovisioned from scratch (`docker compose down -v && up -d`) rather
+  than attempting a live core upgrade — reinstalled WordPress, reactivated
+  the plugin/theme/ACF, reseeded the dummy dataset. Verified: 30/30 tests
+  still pass, the `course`/`instructor`/`provider` post types, ACF field
+  groups and `/courses/` archive all work identically under 7.0.2, no PHP
+  errors or deprecation notices in the container logs. Also hit the same
+  "Plain" permalink default as the original install and fixed it the same
+  way (see the previous entry).
 - **Not yet done:** the query builder, the filter pipeline and hook
   system, REST endpoints, frontend UI, migrations/custom DB tables, and
   integration/feature/e2e tests.
