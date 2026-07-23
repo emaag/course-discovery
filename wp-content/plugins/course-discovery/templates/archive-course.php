@@ -1,9 +1,11 @@
 <?php
 
 /**
- * Course archive template — served for `/courses/` regardless of the
- * active theme, via Frontend\CourseArchiveTemplate's `template_include`
- * hook. Reads filter selections from $_GET and renders through the same
+ * Course listing template — served at the site's front page (`/`)
+ * regardless of the active theme, via Frontend\CourseArchiveTemplate's
+ * `template_include` hook (the Course post type's own archive URL,
+ * `/courses/`, 301-redirects to `/` — see that class). Reads filter
+ * selections from $_GET and renders through the same
  * Filter\FilterPipeline / Query\CourseQueryBuilder the REST API uses, so
  * this works correctly with JavaScript disabled — assets/js/frontend.js
  * progressively enhances it to fetch course-discovery/v1/courses instead
@@ -38,7 +40,7 @@ $builder = (new CourseQueryBuilder())->setPage($page)->setPerPage(9);
 $result = $builder->execute();
 
 $options = (new FilterOptionsProvider())->compute();
-$archiveUrl = (string) get_post_type_archive_link('course');
+$archiveUrl = home_url('/');
 
 get_header();
 ?>

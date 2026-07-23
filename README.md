@@ -410,7 +410,7 @@ The plugin follows a namespaced, PSR-4 structure under
 | `Filter`             | `FilterCriteria` plus one class per filter (search, provider, location, start date, category), each implementing a shared `Filter` interface, composed by `FilterPipeline`. | ✅ Implemented |
 | `Migration`          | Versioned schema/data migration runners for any custom tables (e.g. a course/provider/location lookup table). | ⏳ Planned |
 | `REST`               | `CourseSearchController` (`GET /courses` — filtered, paginated search) and `FilterOptionsController` (`GET /filters` — available option lists), plus `CourseTransformer` for Course→JSON serialisation, behind a `RestController` interface filterable via `course_discovery_rest_controllers`. | ✅ Implemented |
-| `Frontend`           | `CourseArchiveTemplate` (serves the plugin's own `/courses/` template regardless of active theme) and `FilterFieldRenderer` (the multi-select filter disclosures). | ✅ Implemented |
+| `Frontend`           | `CourseArchiveTemplate` (serves the plugin's own course-listing template at the site's front page `/`, 301-redirecting the Course post type's own `/courses/` archive URL there) and `FilterFieldRenderer` (the multi-select filter disclosures). | ✅ Implemented |
 
 ACF (Advanced Custom Fields, free edition) is installed and active as the
 one external plugin the brief allows. Its field groups are defined in code
@@ -720,6 +720,12 @@ but documented here as the intended evolution path.
   courses.statichex.dev and deployed the site there. Verified live:
   front end, admin, seeded data, REST endpoints and combined filtering
   all match local behaviour.
+- 2026-07-23 — Moved the course listing to the site's front page (`/`)
+  instead of the Course post type's own archive URL (`/courses/`), which
+  now 301-redirects to `/` so there's one canonical URL rather than a
+  duplicate. Verified locally: `/` renders the listing, `/courses/`
+  redirects correctly, filtering still works at the new URL, full suite
+  still 59/59.
 - **Not yet done:** migrations/custom DB tables, and integration/
   feature/e2e tests (formal `WP_UnitTestCase`-based ones — the REST and
   frontend layers have been verified live, but not yet as an automated
