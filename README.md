@@ -309,6 +309,13 @@ content and never accumulates duplicates. Regenerating content this way
 reproduces the same dataset on any environment, including the eventual
 public deployment, without transferring a database file.
 
+The specific Provider/Instructor/Course names, descriptions, prices and
+dates hard-coded in `bin/seed.php` were AI-generated as placeholder demo
+content — none of it represents real institutions, people, courses or
+data; only the script's structure (tagging, purge-before-reseed,
+validating dates through the `StartDate` value object) is functional code
+to review.
+
 ## Testing Instructions
 
 The plugin uses PHPUnit for automated tests, run via:
