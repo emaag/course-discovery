@@ -2,6 +2,9 @@
 vendor/
 node_modules/
 
+# PHPUnit runtime cache
+.phpunit.result.cache
+
 # Environment
 .env
 .env.*
