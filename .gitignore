@@ -10,6 +10,10 @@ node_modules/
 wordpress_data/
 db_data/
 
+# SQL dumps for local import (may contain data, kept out of version control)
+db/*.sql
+db/*.sql.gz
+
 # OS / editor cruft
 .DS_Store
 Thumbs.db

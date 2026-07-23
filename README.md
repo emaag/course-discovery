@@ -45,6 +45,22 @@ using the credentials below (development only — do not reuse in production):
 phpMyAdmin is available at `http://localhost:8081` for inspecting the
 database directly.
 
+### Importing a dump
+
+Drop a `.sql` (or `.sql.gz`) file into `db/` and it will be imported
+automatically the first time the `db` container initialises an empty data
+volume (via MySQL's `/docker-entrypoint-initdb.d` mechanism). This only runs
+once per fresh volume — if `db_data` already exists, remove it first
+(`docker compose down -v`) to trigger a re-import.
+
+To import into a database that's already running, instead run:
+
+```bash
+docker compose exec -T db mysql -uwordpress -pwordpress wordpress < db/dump.sql
+```
+
+Dump files in `db/` are gitignored and stay local.
+
 ## Dev Commands
 
 Run these from `wp-content/plugins/course-discovery/`:
