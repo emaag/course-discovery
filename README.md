@@ -26,7 +26,7 @@ project documentation and a running development log.
 | Post types, taxonomy, ACF field groups | ✅ Implemented, verified live |
 | Dummy data seeder (`bin/seed.php`) | ✅ Implemented |
 | Query builder + filter pipeline | ✅ Implemented, verified against live seeded data, 25 unit tests passing |
-| REST endpoint | ⏳ Not started |
+| REST endpoint (`course-discovery/v1/courses`, `/filters`) | ✅ Implemented, verified live |
 | Frontend filter UI | ⏳ Not started |
 | Migrations / custom DB tables | ⏳ Not started |
 | Integration / feature / e2e tests | ⏳ Not started |
@@ -325,16 +325,21 @@ The plugin uses PHPUnit for automated tests, run via:
 composer test
 ```
 
-**Current coverage:** 55 unit tests — `Domain/ValueObject` (`PostId`,
+**Current coverage:** 59 unit tests — `Domain/ValueObject` (`PostId`,
 `Price`, `StartDate`, `Location`, `CategoryTerm`), `Domain/Model`'s
 `Course::locations()` derivation logic, `Filter\FilterCriteria` parsing,
 every concrete `Filter`'s contribution to the query builder, the
-`FilterPipeline`'s end-to-end AND/OR composition, and
-`Query\CourseResultAssembler`'s filter/pagination math. All run with no
-WordPress bootstrap — including the filter/query logic, since predicates
-are tested against fabricated `Course` objects rather than a live
-`WP_Query`. Integration, feature and e2e tests (below) land once the REST
-endpoint exists to test against.
+`FilterPipeline`'s end-to-end AND/OR composition,
+`Query\CourseResultAssembler`'s filter/pagination math, and
+`REST\CourseTransformer`'s Course→JSON conversion. All run with no
+WordPress bootstrap — including the filter/query/transformer logic, since
+predicates and serialisation are tested against fabricated `Course`
+objects rather than a live `WP_Query`/`WP_REST_Request`. The REST
+controllers themselves (`register()`/`handle()`, which do need `WP_Query`
+and the REST request/response classes) are verified live against the
+running site instead — see the Development Log — which is exactly the
+integration tier described below; genuine `WP_UnitTestCase`-based
+integration tests are the next step to formalise that.
 
 ### Strategy (planned)
 
@@ -391,7 +396,7 @@ The plugin follows a namespaced, PSR-4 structure under
 | `Query`              | `CourseQueryBuilder` (a typed, fluent `WP_Query` abstraction), `CourseResultAssembler` (pure filter/pagination logic) and `CourseSearchClause` (widens search to the `short_description` ACF field). | ✅ Implemented |
 | `Filter`             | `FilterCriteria` plus one class per filter (search, provider, location, start date, category), each implementing a shared `Filter` interface, composed by `FilterPipeline`. | ✅ Implemented |
 | `Migration`          | Versioned schema/data migration runners for any custom tables (e.g. a course/provider/location lookup table). | ⏳ Planned |
-| `REST`               | REST controllers exposing course search/filtering to the frontend. | ⏳ Planned |
+| `REST`               | `CourseSearchController` (`GET /courses` — filtered, paginated search) and `FilterOptionsController` (`GET /filters` — available option lists), plus `CourseTransformer` for Course→JSON serialisation, behind a `RestController` interface filterable via `course_discovery_rest_controllers`. | ✅ Implemented |
 
 ACF (Advanced Custom Fields, free edition) is installed and active as the
 one external plugin the brief allows. Its field groups are defined in code
@@ -438,13 +443,17 @@ provide a rendering surface for the plugin during development.
   and `course_discovery_order_courses` (customise result ordering, over
   the hydrated `Course` list rather than just `WP_Query`'s `orderby`);
   `FilterCriteria::fromArray()` fires `course_discovery_transform_criteria`
-  (rewrite raw search criteria before it's typed). New filters, altered
-  query args, or custom ordering are all addable by third-party code
-  hooking in, with no changes to existing filter classes. The one
-  extension point named in the brief not yet wired up is altering
-  available filter *options* (e.g. the list of Providers shown in a
-  dropdown) — there's nothing to filter yet until the REST endpoint/
-  frontend expose those option lists.
+  (rewrite raw search criteria before it's typed); `FilterOptionsController`
+  fires `course_discovery_filter_options` (alter the available Provider/
+  Location/Category/StartDate option lists returned to the frontend). New
+  filters, altered query args, custom ordering, or altered filter options
+  are all addable by third-party code hooking in, with no changes to any
+  existing filter/controller class.
+- **Filter options derived from live data, not configuration.** `GET
+  /filters` computes its option lists by walking every currently published
+  Course rather than listing all Providers/Categories that exist — so an
+  option that wouldn't return anything (e.g. a Provider with no Course
+  assigned yet) never appears as a selectable filter value.
 - **`WP_Query` abstraction.** Domain code never builds raw `WP_Query` arg
   arrays inline; a query builder translates typed filter criteria into
   `WP_Query`/`WP_Meta_Query`/`WP_Tax_Query` arguments in one place, which is
@@ -608,7 +617,24 @@ but documented here as the intended evolution path.
   field (not title/content), proving `CourseSearchClause`'s join actually
   extends WordPress's default search rather than just coincidentally
   overlapping with it. No PHP errors in the container logs.
-- **Not yet done:** REST endpoints, frontend UI, migrations/custom DB
-  tables, and integration/feature/e2e tests.
+- 2026-07-23 — Added the REST layer: `GET /wp-json/course-discovery/v1/
+  courses` (filtered, paginated search) and `.../filters` (available
+  option lists, derived from currently published courses, wiring up the
+  brief's "altering available filter options" extension point via
+  `course_discovery_filter_options` — the one hook missing after the
+  previous milestone). Added `CourseTransformer` for Course→JSON
+  serialisation and refactored `CourseQueryBuilder`/`CourseResultAssembler`
+  to share fetch logic between the paginated `execute()` and a new
+  `executeAll()`. 4 new unit tests (59/59 total). Verified live: an
+  unfiltered request paginates correctly; combined category+location
+  AND-filtering and a deliberately contradictory combination (expecting
+  zero) both behave correctly through the actual HTTP endpoint, not just
+  in-process; search still matches `short_description`-only text over
+  REST; `/filters` returns correct counts and chronologically-ordered
+  start dates. No PHP errors in the container logs.
+- **Not yet done:** frontend UI, migrations/custom DB tables, and
+  integration/feature/e2e tests (formal `WP_UnitTestCase`-based ones —
+  the REST layer has been verified live, but not yet as an automated
+  suite).
 
 </details>
