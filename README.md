@@ -444,16 +444,29 @@ own testing surface).
 
 **Regression prevention** — each `Filter` implementation ships with a fixed
 fixture set (known Courses/Providers/Locations) and a table of
-input-selection → expected-result-IDs cases, run in CI on every change.
-Query-shape assertions (not just result counts) are used for the filters
-most likely to regress silently, since a wrong-but-similar SQL join can
-still return plausible-looking results.
+input-selection → expected-result-IDs cases (`tests/Unit/Filter/*Test.php`),
+run via `composer test`. Query-*shape* assertions, not just result counts,
+are used for the filters most likely to regress silently — e.g.
+`CategoryFilterTest` asserts the exact `tax_query` array produced, not
+just which courses come back — since a wrong-but-similar SQL join can
+still return plausible-looking results. There's no CI pipeline configured
+in this repo (no `.github/workflows`) — a reasonable next step, not
+something built for this exercise.
 
-**Testing new filters** — because filters implement a shared
-`Filter` contract (see Architectural Decisions below), a generic contract test
-suite runs against every registered filter implementation, so a new filter
-is exercised the same way as existing ones without hand-writing bespoke
-plumbing each time; only its fixture data and expected cases need adding.
+**Testing new filters** — because every filter implements the same
+`Filter` contract (see Architectural Decisions below), each has its own
+focused unit test following an identical pattern: apply the filter to a
+`CourseQueryBuilder` with given criteria, then inspect the builder's
+state via its `taxQuery()`/`searchTerm()`/`postFilterPredicates()`
+getters (for a tax_query- or search-based filter) or invoke the
+predicate it registered against fabricated `Course` objects (for an
+in-PHP one) — see `tests/Unit/Filter/*Test.php` for the existing five. A
+new filter follows the same template rather than needing bespoke test
+plumbing invented from scratch. There isn't a single generic contract
+test that runs automatically against every registered filter — that
+would be a reasonable follow-up (a shared test trait/base asserting "no
+criteria ⇒ no contribution" and similar invariants across all filters)
+rather than something built for this exercise.
 
 ## Architectural Decisions
 
@@ -851,8 +864,8 @@ but documented here as the intended evolution path.
 - 2026-07-23 — Added the Playwright e2e suite (13 tests across
   `keyboard-operability`, `combobox-filters`, `filter-narrows-results` —
   see Testing Instructions). Getting a browser running at all in this
-  sandboxed session needed a workaround ([[browser-screenshot-limitation]]):
-  Chromium needs `libnspr4`/`libnss3`, which need root to install and
+  sandboxed session needed a workaround: Chromium needs
+  `libnspr4`/`libnss3`, which need root to install and
   there's no passwordless sudo here, so I extracted the `.deb` packages
   manually and pointed `LD_LIBRARY_PATH` at them. That got a browser
   launching, but only stably under `--single-process --no-zygote` flags
