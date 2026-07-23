@@ -177,7 +177,11 @@ technologies.
 4. Log in to `/wp-admin/` and activate:
    - **Plugins → Course Discovery**
    - **Appearance → Themes → Course Discovery Theme**
-5. Visit **http://localhost:8080** to confirm the front end renders under
+5. Install and activate **Advanced Custom Fields** (free edition) via
+   **Plugins → Add New → search "Advanced Custom Fields"** — this is the
+   one external plugin the brief allows, and the Course/Provider field
+   groups (registered in code by the plugin) only appear once it's active.
+6. Visit **http://localhost:8080** to confirm the front end renders under
    the Course Discovery theme.
 
 | Service    | URL                                              |
@@ -311,16 +315,17 @@ The plugin follows a namespaced, PSR-4 structure under
 | `Domain/ValueObject` | Immutable value objects (`Price`, `StartDate`, `PostId`, `Location`, `CategoryTerm`) so primitives never leak into the domain layer. | ✅ Implemented |
 | `PostType`           | Custom post type registrations (`course`, `instructor`, `provider`), each behind a `PostTypeRegistrar` interface and filterable via `course_discovery_post_types`. | ✅ Implemented |
 | `Taxonomy`           | Custom taxonomy registrations (hierarchical `course_category`), behind a `TaxonomyRegistrar` interface and filterable via `course_discovery_taxonomies`. | ✅ Implemented |
+| `Field`              | ACF field groups registered in code (`acf_add_local_field_group`) for Course and Provider, behind a `FieldGroupRegistrar` interface and filterable via `course_discovery_field_groups`. | ✅ Implemented |
 | `Query`              | A `WP_Query` abstraction (`CourseQuery`/`CourseQueryBuilder`) exposing a typed, fluent API instead of passing `WP_Query` arg arrays around directly. | ⏳ Planned |
 | `Filter`             | One class per filter (search, provider, location, start date, category), each implementing a shared `Filter` interface with a method to contribute to the query builder given selected criteria. | ⏳ Planned |
 | `Migration`          | Versioned schema/data migration runners for any custom tables (e.g. a course/provider/location lookup table). | ⏳ Planned |
 | `REST`               | REST controllers exposing course search/filtering to the frontend. | ⏳ Planned |
 
-ACF field groups (the `short_description`, `price`, `instructors`,
-`providers` and `start_dates` fields the Domain/Model layer expects — see
-the docblock on `Course::fromPost()`) are not registered yet, so those
-fields won't appear on the Course/Instructor/Provider edit screens until
-that lands.
+ACF (Advanced Custom Fields, free edition) is installed and active as the
+one external plugin the brief allows. Its field groups are defined in code
+rather than left as UI-only config, so the schema versions alongside the
+domain model that reads it — see the docblock on `Course::fromPost()` for
+the exact field names each group must keep in sync with.
 
 The theme (`course-discovery-theme`) is intentionally minimal and exists to
 provide a rendering surface for the plugin during development.
@@ -461,8 +466,15 @@ but documented here as the intended evolution path.
   post types/taxonomies can be added by a third party without editing
   `Plugin.php`. Verified live: admin screens load, `post_type_exists()`/
   `taxonomy_exists()` all return true, no PHP errors.
-- **Not yet done:** ACF field groups, the query builder, the filter
-  pipeline and hook system, REST endpoints, frontend UI, migrations/custom
-  DB tables, and integration/feature/e2e tests.
+- 2026-07-23 — Advanced Custom Fields (free edition) installed and
+  activated. `Field` namespace added: `CourseFieldGroup` (short
+  description, price, instructors, providers, start dates repeater) and
+  `ProviderFieldGroup` (location), registered in code via
+  `acf_add_local_field_group` on ACF's `acf/init` hook, filterable via
+  `course_discovery_field_groups`. Verified live: both field groups render
+  on the real Course/Provider "Add New" admin screens, no PHP errors.
+- **Not yet done:** the query builder, the filter pipeline and hook
+  system, REST endpoints, frontend UI, migrations/custom DB tables, seed/
+  dummy data, and integration/feature/e2e tests.
 
 </details>

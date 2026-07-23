@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace OxfordInternational\CourseDiscovery;
 
+use OxfordInternational\CourseDiscovery\Field\CourseFieldGroup;
+use OxfordInternational\CourseDiscovery\Field\FieldGroupRegistrar;
+use OxfordInternational\CourseDiscovery\Field\ProviderFieldGroup;
 use OxfordInternational\CourseDiscovery\PostType\CoursePostType;
 use OxfordInternational\CourseDiscovery\PostType\InstructorPostType;
 use OxfordInternational\CourseDiscovery\PostType\PostTypeRegistrar;
@@ -28,6 +31,7 @@ final class Plugin
     {
         add_action('init', [$this, 'registerPostTypes']);
         add_action('init', [$this, 'registerTaxonomies']);
+        add_action('acf/init', [$this, 'registerFieldGroups']);
         add_action('rest_api_init', [$this, 'registerRestRoutes']);
         add_action('plugins_loaded', [$this, 'runMigrations']);
     }
@@ -58,6 +62,25 @@ final class Plugin
          */
         $registrars = apply_filters('course_discovery_taxonomies', [
             new CourseCategoryTaxonomy(),
+        ]);
+
+        foreach ($registrars as $registrar) {
+            $registrar->register();
+        }
+    }
+
+    public function registerFieldGroups(): void
+    {
+        if (! function_exists('acf_add_local_field_group')) {
+            return;
+        }
+
+        /**
+         * @param list<FieldGroupRegistrar> $registrars
+         */
+        $registrars = apply_filters('course_discovery_field_groups', [
+            new CourseFieldGroup(),
+            new ProviderFieldGroup(),
         ]);
 
         foreach ($registrars as $registrar) {
