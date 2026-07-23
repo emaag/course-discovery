@@ -1,0 +1,17 @@
+# Dependencies
+vendor/
+node_modules/
+
+# Environment
+.env
+.env.*
+
+# Docker volumes (bind-mounted named volumes are managed by Docker, not git)
+wordpress_data/
+db_data/
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
