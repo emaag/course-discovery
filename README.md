@@ -18,6 +18,8 @@ This is a pre-interview technical exercise for Oxford International. The
 verbatim task brief is preserved below for reference, followed by the
 project documentation and a running development log.
 
+**Live deployment:** [courses.statichex.dev](http://courses.statichex.dev)
+
 ### Status at a glance
 
 | Layer | State |
@@ -170,6 +172,7 @@ technologies.
 ## Table of Contents
 
 - [Setup Instructions](#setup-instructions)
+- [Production Deployment](#production-deployment)
 - [Environment Requirements](#environment-requirements)
 - [Database Setup](#database-setup)
 - [Development Commands](#development-commands)
@@ -217,6 +220,16 @@ technologies.
 | WP Admin   | http://localhost:8080/wp-admin/                    |
 | phpMyAdmin | http://localhost:8081                              |
 | MySQL      | `localhost:3306` (from host) / `db:3306` (in-network) |
+
+## Production Deployment
+
+The live deployment is at **[courses.statichex.dev](http://courses.statichex.dev)**,
+on shared cPanel hosting rather than Docker — that environment has no
+Docker/root access, so it runs WordPress, the plugin and ACF directly
+under PHP-FPM, with its own isolated MySQL database. Same codebase, same
+plugin/theme, seeded with `bin/seed.php`. HTTPS is available but currently
+shows a certificate mismatch (AutoSSL for the subdomain hasn't run yet) —
+use the `http://` URL above in the meantime.
 
 ## Environment Requirements
 
@@ -703,6 +716,10 @@ but documented here as the intended evolution path.
   whatever non-plugin pages the theme renders. No PHP, JS or HTML
   structure changed — CSS only, per the request; verified no errors,
   correct palette served, full suite still 59/59.
+- 2026-07-23 — Provisioned production server on my account at
+  courses.statichex.dev and deployed the site there. Verified live:
+  front end, admin, seeded data, REST endpoints and combined filtering
+  all match local behaviour.
 - **Not yet done:** migrations/custom DB tables, and integration/
   feature/e2e tests (formal `WP_UnitTestCase`-based ones — the REST and
   frontend layers have been verified live, but not yet as an automated
