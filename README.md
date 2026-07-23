@@ -558,12 +558,11 @@ but documented here as the intended evolution path.
   combobox (with typeahead filtering) is expected instead, that would
   be a follow-up to `FilterFieldRenderer`, not a change to the
   underlying Filter/Query layer.
-- No visual design system or brand was specified, so the frontend
-  styling (`assets/css/frontend.css`) makes its own deliberate but
-  minimal choices — system fonts only (no external font/CDN
-  dependency, so the page renders identically offline), a small colour
-  token set, and a light catalog/card-index visual motif — rather than
-  attempting to match an unspecified brand.
+- Visual styling (`assets/css/frontend.css`) follows an explicit
+  direction: light/white background, one accent colour (Oxford blue
+  `#002147`), system fonts only (no external font/CDN dependency, so the
+  page renders identically offline) — a professional "university
+  website" look rather than a developer-tool aesthetic.
 
 ## Development Log
 
@@ -691,6 +690,19 @@ but documented here as the intended evolution path.
   (Playwright's Chromium needs `libnspr4`, which needs root to install
   and this environment has no passwordless sudo) — visual review was
   done by request rather than by an automated check.
+- 2026-07-23 — Restyled the frontend on explicit direction: replaced the
+  earlier serif/monospace catalog motif with a light/white, professional
+  "university website" look — Oxford blue (`#002147`) as the single
+  accent colour, system fonts throughout (no monospace, no serif
+  display), white cards with a subtle border and hover shadow-lift,
+  filter dropdowns styled as plain form controls rather than coloured
+  pills, an explicit 3/2/1-column responsive grid, and a CSS-only search
+  icon (an inline SVG data URI as the input's `background-image`, so no
+  HTML changed). Also added a matching light-theme base (body font,
+  background, link colour) to `course-discovery-theme/style.css` for
+  whatever non-plugin pages the theme renders. No PHP, JS or HTML
+  structure changed — CSS only, per the request; verified no errors,
+  correct palette served, full suite still 59/59.
 - **Not yet done:** migrations/custom DB tables, and integration/
   feature/e2e tests (formal `WP_UnitTestCase`-based ones — the REST and
   frontend layers have been verified live, but not yet as an automated

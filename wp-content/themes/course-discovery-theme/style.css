@@ -8,3 +8,30 @@ Requires at least: 6.7
 Requires PHP: 8.2
 Text Domain: course-discovery-theme
 */
+
+/*
+ * Base page styling only — the Course Discovery plugin owns the actual
+ * filter UI (wp-content/plugins/course-discovery/assets/css/
+ * frontend.css). This just gives the shell this theme renders (header,
+ * footer, any non-plugin page) the same light, professional baseline
+ * rather than unstyled browser defaults.
+ */
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background: #ffffff;
+    color: #1a1a2e;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.5;
+}
+
+a {
+    color: #002147;
+}
+
+a:hover {
+    color: #001631;
+}
