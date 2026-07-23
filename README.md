@@ -27,7 +27,7 @@ project documentation and a running development log.
 | Dummy data seeder (`bin/seed.php`) | ✅ Implemented |
 | Query builder + filter pipeline | ✅ Implemented, verified against live seeded data, 25 unit tests passing |
 | REST endpoint (`course-discovery/v1/courses`, `/filters`) | ✅ Implemented, verified live |
-| Frontend filter UI | ⏳ Not started |
+| Frontend filter UI | ✅ Implemented, verified live |
 | Migrations / custom DB tables | ⏳ Not started |
 | Integration / feature / e2e tests | ⏳ Not started |
 
@@ -393,10 +393,11 @@ The plugin follows a namespaced, PSR-4 structure under
 | `PostType`           | Custom post type registrations (`course`, `instructor`, `provider`), each behind a `PostTypeRegistrar` interface and filterable via `course_discovery_post_types`. | ✅ Implemented |
 | `Taxonomy`           | Custom taxonomy registrations (hierarchical `course_category`), behind a `TaxonomyRegistrar` interface and filterable via `course_discovery_taxonomies`. | ✅ Implemented |
 | `Field`              | ACF field groups registered in code (`acf_add_local_field_group`) for Course and Provider, behind a `FieldGroupRegistrar` interface and filterable via `course_discovery_field_groups`. | ✅ Implemented |
-| `Query`              | `CourseQueryBuilder` (a typed, fluent `WP_Query` abstraction), `CourseResultAssembler` (pure filter/pagination logic) and `CourseSearchClause` (widens search to the `short_description` ACF field). | ✅ Implemented |
+| `Query`              | `CourseQueryBuilder` (a typed, fluent `WP_Query` abstraction), `CourseResultAssembler` (pure filter/pagination logic), `CourseSearchClause` (widens search to the `short_description` ACF field) and `FilterOptionsProvider` (available filter option lists). | ✅ Implemented |
 | `Filter`             | `FilterCriteria` plus one class per filter (search, provider, location, start date, category), each implementing a shared `Filter` interface, composed by `FilterPipeline`. | ✅ Implemented |
 | `Migration`          | Versioned schema/data migration runners for any custom tables (e.g. a course/provider/location lookup table). | ⏳ Planned |
 | `REST`               | `CourseSearchController` (`GET /courses` — filtered, paginated search) and `FilterOptionsController` (`GET /filters` — available option lists), plus `CourseTransformer` for Course→JSON serialisation, behind a `RestController` interface filterable via `course_discovery_rest_controllers`. | ✅ Implemented |
+| `Frontend`           | `CourseArchiveTemplate` (serves the plugin's own `/courses/` template regardless of active theme) and `FilterFieldRenderer` (the multi-select filter disclosures). | ✅ Implemented |
 
 ACF (Advanced Custom Fields, free edition) is installed and active as the
 one external plugin the brief allows. Its field groups are defined in code
@@ -472,6 +473,24 @@ provide a rendering surface for the plugin during development.
   plugin); all business logic and typed access goes through the
   `Domain/Model` and `Domain/ValueObject` layer so the rest of the codebase
   never touches `get_field()` calls directly.
+- **Frontend as progressive enhancement, not a JS-only app.**
+  `templates/archive-course.php` reads filter selections straight from
+  `$_GET` and renders through the exact same `FilterCriteria`/
+  `FilterPipeline`/`CourseQueryBuilder` the REST API uses — so the page
+  filters correctly via a normal form submission with JavaScript
+  disabled. `assets/js/frontend.js` only replaces that full-page reload
+  with a `fetch` against `course-discovery/v1/courses` and an in-place
+  DOM update; it never introduces filtering logic that doesn't already
+  exist server-side, so the two can't drift out of sync with each other.
+- **Multi-select "combobox" as a native `<details>`/`<summary>`
+  disclosure, not a hand-built ARIA `role="combobox"` widget.** The
+  brief requires Locations and Start Dates to be a dropdown combobox;
+  `FilterFieldRenderer` implements all four multi-selects (Providers,
+  Locations, Categories, Start Dates) this way for consistency. A native
+  disclosure widget gets correct open/close keyboard behaviour from the
+  browser for free and works with JavaScript entirely disabled, which a
+  custom combobox's hand-rolled keyboard handling can't guarantee — see
+  the class's own docblock, and Assumptions Made below.
 
 ## Performance & Scalability
 
@@ -530,6 +549,21 @@ but documented here as the intended evolution path.
   versions is assumed.
 - Domain logic lives in the plugin, not the theme; the theme is a thin
   presentation layer.
+- "Dropdown combobox" (for Locations/Start Dates) is interpreted as a
+  closed-by-default control that expands into a list of options on
+  click or keyboard activation — not specifically the WAI-ARIA
+  `role="combobox"` pattern (a text input with inline autocomplete).
+  Implemented as a native `<details>`/`<summary>` disclosure instead;
+  see the Design Decisions note above for why. If a stricter ARIA
+  combobox (with typeahead filtering) is expected instead, that would
+  be a follow-up to `FilterFieldRenderer`, not a change to the
+  underlying Filter/Query layer.
+- No visual design system or brand was specified, so the frontend
+  styling (`assets/css/frontend.css`) makes its own deliberate but
+  minimal choices — system fonts only (no external font/CDN
+  dependency, so the page renders identically offline), a small colour
+  token set, and a light catalog/card-index visual motif — rather than
+  attempting to match an unspecified brand.
 
 ## Development Log
 
@@ -632,9 +666,34 @@ but documented here as the intended evolution path.
   in-process; search still matches `short_description`-only text over
   REST; `/filters` returns correct counts and chronologically-ordered
   start dates. No PHP errors in the container logs.
-- **Not yet done:** frontend UI, migrations/custom DB tables, and
-  integration/feature/e2e tests (formal `WP_UnitTestCase`-based ones —
-  the REST layer has been verified live, but not yet as an automated
+- 2026-07-23 — Built the frontend filter UI: `Frontend\
+  CourseArchiveTemplate` serves the plugin's own `templates/archive-
+  course.php` for `/courses/` via `template_include`, independent of the
+  active theme. The page reads filter selections from `$_GET` and
+  renders through the same `FilterCriteria`/`FilterPipeline`/
+  `CourseQueryBuilder` the REST API uses, so it filters correctly with
+  JavaScript entirely disabled; `assets/js/frontend.js` progressively
+  enhances it to fetch `course-discovery/v1/courses` and update the DOM
+  in place instead of reloading the page. `FilterFieldRenderer` renders
+  Providers/Locations/Categories/Start Dates as native `<details>`/
+  `<summary>` multi-select disclosures (see Design Decisions/Assumptions
+  for why, not a hand-built ARIA combobox). Extracted `FilterOptions
+  Provider` out of `FilterOptionsController` so the REST endpoint and the
+  server-rendered template compute option lists identically. Also took a
+  design pass on `assets/css/frontend.css`: a small catalog/card-index
+  visual motif (serif headings, monospace price/date "stamps", tab-
+  styled filter disclosures), system fonts only, dark-mode and
+  reduced-motion aware. Verified live: unfiltered and filtered page
+  loads both render correctly via plain GET (no-JS baseline), selected
+  filters persist as checked checkboxes and badge counts across a
+  request, CSS/JS assets load with no errors, full test suite still
+  59/59. Could not capture an automated screenshot in this environment
+  (Playwright's Chromium needs `libnspr4`, which needs root to install
+  and this environment has no passwordless sudo) — visual review was
+  done by request rather than by an automated check.
+- **Not yet done:** migrations/custom DB tables, and integration/
+  feature/e2e tests (formal `WP_UnitTestCase`-based ones — the REST and
+  frontend layers have been verified live, but not yet as an automated
   suite).
 
 </details>

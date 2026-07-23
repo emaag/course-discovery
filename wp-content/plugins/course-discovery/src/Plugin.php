@@ -7,6 +7,7 @@ namespace OxfordInternational\CourseDiscovery;
 use OxfordInternational\CourseDiscovery\Field\CourseFieldGroup;
 use OxfordInternational\CourseDiscovery\Field\FieldGroupRegistrar;
 use OxfordInternational\CourseDiscovery\Field\ProviderFieldGroup;
+use OxfordInternational\CourseDiscovery\Frontend\CourseArchiveTemplate;
 use OxfordInternational\CourseDiscovery\PostType\CoursePostType;
 use OxfordInternational\CourseDiscovery\PostType\InstructorPostType;
 use OxfordInternational\CourseDiscovery\PostType\PostTypeRegistrar;
@@ -37,6 +38,8 @@ final class Plugin
         add_action('acf/init', [$this, 'registerFieldGroups']);
         add_action('rest_api_init', [$this, 'registerRestRoutes']);
         add_action('plugins_loaded', [$this, 'runMigrations']);
+
+        (new CourseArchiveTemplate())->registerHooks();
     }
 
     public function registerPostTypes(): void

@@ -1,0 +1,344 @@
+/*
+ * Design concept: a course *catalog* — filter tabs read like card-catalog
+ * drawer labels, and each course card carries a monospace price/date
+ * "stamp" the way a library due-date stamp would. Serif for headings,
+ * system sans for body copy, monospace for catalog metadata. System font
+ * stacks only (no external font loading), so this renders identically
+ * offline and never depends on a third-party CDN.
+ */
+
+.course-discovery-archive {
+    --cd-ink: #1b1b1f;
+    --cd-muted: #6b6a63;
+    --cd-paper: #f6f5f1;
+    --cd-surface: #ffffff;
+    --cd-border: #ddd9cc;
+    --cd-accent: #362f78;
+    --cd-accent-contrast: #ffffff;
+    --cd-stamp-ink: #9a3412;
+    --cd-stamp-bg: #fdf1e9;
+    --cd-focus: #362f78;
+
+    --cd-font-display: Iowan Old Style, Palatino Linotype, Palatino, Georgia, serif;
+    --cd-font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --cd-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+
+    max-width: 72rem;
+    margin: 0 auto;
+    padding: 2rem 1.5rem 3rem;
+    background: var(--cd-paper);
+    color: var(--cd-ink);
+    font-family: var(--cd-font-body);
+    line-height: 1.5;
+}
+
+@media (prefers-color-scheme: dark) {
+    .course-discovery-archive {
+        --cd-ink: #ececec;
+        --cd-muted: #a3a29a;
+        --cd-paper: #17181c;
+        --cd-surface: #202126;
+        --cd-border: #35363b;
+        --cd-accent: #a5a0e6;
+        --cd-accent-contrast: #17181c;
+        --cd-stamp-ink: #f3b48a;
+        --cd-stamp-bg: #2c2117;
+        --cd-focus: #a5a0e6;
+    }
+}
+
+.course-discovery-archive h1 {
+    font-family: var(--cd-font-display);
+    font-size: 2.25rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin: 0 0 1.5rem;
+}
+
+.course-discovery-archive :is(a, button, summary, input):focus-visible {
+    outline: 2px solid var(--cd-focus);
+    outline-offset: 2px;
+}
+
+/* --- Filter toolbar --- */
+
+.course-discovery-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem 1rem;
+    align-items: flex-end;
+    margin-bottom: 2rem;
+    padding: 1.25rem;
+    background: var(--cd-surface);
+    border: 1px solid var(--cd-border);
+    border-radius: 8px;
+}
+
+.course-discovery-field label {
+    display: block;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--cd-muted);
+    margin-bottom: 0.35rem;
+}
+
+.course-discovery-field input[type="search"] {
+    padding: 0.55rem 0.75rem;
+    min-width: 16rem;
+    font: inherit;
+    color: var(--cd-ink);
+    background: var(--cd-paper);
+    border: 1px solid var(--cd-border);
+    border-radius: 6px;
+}
+
+.course-discovery-filter {
+    position: relative;
+}
+
+.course-discovery-filter summary {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    cursor: pointer;
+    padding: 0.55rem 0.9rem;
+    background: var(--cd-paper);
+    color: var(--cd-ink);
+    border: 1px solid var(--cd-border);
+    border-radius: 6px 6px 0 0;
+    font-weight: 600;
+    font-size: 0.95rem;
+    list-style: none;
+    user-select: none;
+}
+
+.course-discovery-filter:not([open]) summary {
+    border-radius: 6px;
+}
+
+.course-discovery-filter summary::-webkit-details-marker {
+    display: none;
+}
+
+.course-discovery-filter summary::after {
+    content: "\25BE";
+    color: var(--cd-muted);
+    font-size: 0.7rem;
+}
+
+.course-discovery-filter[open] summary::after {
+    content: "\25B4";
+}
+
+.course-discovery-filter__badge {
+    display: inline-block;
+    min-width: 1.15rem;
+    padding: 0 0.35rem;
+    background: var(--cd-accent);
+    color: var(--cd-accent-contrast);
+    border-radius: 999px;
+    font-family: var(--cd-font-mono);
+    font-size: 0.7rem;
+    line-height: 1.15rem;
+    text-align: center;
+}
+
+.course-discovery-filter__panel {
+    position: absolute;
+    z-index: 10;
+    top: 100%;
+    left: 0;
+    min-width: 15rem;
+    max-height: 16rem;
+    overflow-y: auto;
+    padding: 0.5rem;
+    background: var(--cd-surface);
+    border: 1px solid var(--cd-border);
+    border-radius: 0 6px 6px 6px;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.14);
+}
+
+.course-discovery-filter__option {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.4rem 0.5rem;
+    border-radius: 4px;
+    font-weight: normal;
+    cursor: pointer;
+}
+
+.course-discovery-filter__option:hover {
+    background: var(--cd-paper);
+}
+
+.course-discovery-filter__empty {
+    padding: 0.4rem 0.5rem;
+    margin: 0;
+    color: var(--cd-muted);
+    font-size: 0.9rem;
+}
+
+.course-discovery-filters__actions {
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
+    margin-left: auto;
+}
+
+.course-discovery-filters__actions button {
+    padding: 0.6rem 1.4rem;
+    background: var(--cd-accent);
+    color: var(--cd-accent-contrast);
+    border: none;
+    border-radius: 6px;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.course-discovery-filters__actions button:hover {
+    opacity: 0.9;
+}
+
+.course-discovery-filters__reset {
+    color: var(--cd-muted);
+    font-size: 0.9rem;
+    text-decoration: underline;
+}
+
+/* --- Results --- */
+
+.course-discovery-results-count {
+    margin: 0 0 1rem;
+    color: var(--cd-muted);
+    font-size: 0.95rem;
+}
+
+.course-discovery-results {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+    gap: 1.25rem;
+    list-style: none;
+    margin: 0 0 2rem;
+    padding: 0;
+}
+
+.course-discovery-card {
+    background: var(--cd-surface);
+    border: 1px solid var(--cd-border);
+    border-top: 3px solid var(--cd-accent);
+    border-radius: 0 0 8px 8px;
+    padding: 1.1rem 1.25rem 1.25rem;
+}
+
+.course-discovery-card__title {
+    font-family: var(--cd-font-display);
+    font-size: 1.2rem;
+    font-weight: 600;
+    margin: 0 0 0.5rem;
+}
+
+.course-discovery-card__description {
+    margin: 0;
+    color: var(--cd-muted);
+    font-size: 0.95rem;
+}
+
+.course-discovery-card__meta {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    margin: 0.9rem 0 0;
+    font-size: 0.85rem;
+}
+
+.course-discovery-card__meta div {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+}
+
+.course-discovery-card__meta dt {
+    flex: 0 0 auto;
+    font-weight: 600;
+    color: var(--cd-muted);
+    text-transform: uppercase;
+    font-size: 0.7rem;
+    letter-spacing: 0.04em;
+}
+
+.course-discovery-card__meta dd {
+    margin: 0;
+    font-family: var(--cd-font-mono);
+}
+
+.course-discovery-card__meta div:first-child dd {
+    display: inline-block;
+    padding: 0.1rem 0.4rem;
+    background: var(--cd-stamp-bg);
+    color: var(--cd-stamp-ink);
+    border-radius: 3px;
+}
+
+.course-discovery-empty {
+    grid-column: 1 / -1;
+    padding: 2rem;
+    text-align: center;
+    color: var(--cd-muted);
+    background: var(--cd-surface);
+    border: 1px dashed var(--cd-border);
+    border-radius: 8px;
+}
+
+/* --- Pagination --- */
+
+.course-discovery-pagination {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    font-size: 0.9rem;
+    color: var(--cd-muted);
+}
+
+.course-discovery-pagination button {
+    padding: 0.4rem 0.9rem;
+    background: var(--cd-surface);
+    color: var(--cd-ink);
+    border: 1px solid var(--cd-border);
+    border-radius: 6px;
+    font: inherit;
+    cursor: pointer;
+}
+
+.course-discovery-pagination button:hover {
+    border-color: var(--cd-accent);
+}
+
+/* --- Responsive --- */
+
+@media (max-width: 40rem) {
+    .course-discovery-filters {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .course-discovery-field input[type="search"] {
+        min-width: 0;
+        width: 100%;
+    }
+
+    .course-discovery-filters__actions {
+        margin-left: 0;
+        justify-content: space-between;
+    }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    .course-discovery-filters__actions button,
+    .course-discovery-pagination button {
+        transition: opacity 0.15s ease, border-color 0.15s ease;
+    }
+}
