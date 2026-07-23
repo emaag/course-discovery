@@ -1,18 +1,25 @@
 # Course Discovery
 
-## Overview
+**A domain-modelled course search & filtering system, built as a WordPress plugin.**
+
+![WordPress](https://img.shields.io/badge/WordPress-6.7-21759B?logo=wordpress&logoColor=white)
+![PHP](https://img.shields.io/badge/PHP-8.2%2B-777BB4?logo=php&logoColor=white)
+![MySQL](https://img.shields.io/badge/MySQL-8.0-4479A1?logo=mysql&logoColor=white)
+![Docker Compose](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)
+![Status](https://img.shields.io/badge/status-in%20progress-yellow)
 
 Course Discovery is a WordPress plugin (with a minimal companion theme) that
-provides course search, filtering and discovery. This repository contains a
-Dockerised local development environment plus the plugin and theme source.
+provides course search, filtering and discovery for an EdTech platform. It's
+built around a typed domain model, a composable filter pipeline, and a
+hook/event extension surface — see [Architectural Decisions](#architectural-decisions)
+for the reasoning.
 
 This is a pre-interview technical exercise for Oxford International. The
-full brief is reproduced below for reference, followed by a running log of
-progress.
+verbatim task brief is preserved below for reference, followed by the
+project documentation and a running development log.
 
-## Task Brief
-
-> Reproduced verbatim from the exercise instructions.
+<details>
+<summary><strong>Task Brief</strong> (reproduced verbatim from the exercise instructions — click to expand)</summary>
 
 ### Overview
 
@@ -142,42 +149,43 @@ to support hundreds of thousands (or millions) of courses — including when
 to introduce dedicated lookup tables, denormalised data, or external search
 technologies.
 
-## Progress
+</details>
 
-- 2026-07-23 — Repository initialised; Docker Compose scaffolded
-  (WordPress 6.7/PHP 8.2, MySQL 8.0, phpMyAdmin on ports 8080/8081/3306).
-- 2026-07-23 — Plugin scaffold created at
-  `wp-content/plugins/course-discovery`: `composer.json` with PSR-4
-  autoloading (`OxfordInternational\CourseDiscovery\` → `src/`), main plugin
-  file with WordPress headers, and a `Plugin.php` bootstrap class wiring
-  `init` / `rest_api_init` / `plugins_loaded` hooks. Empty stub directories
-  created for `Domain/ValueObject`, `Domain/Model`, `Query`, `Filter`,
-  `PostType`, `Taxonomy`, `Migration`, `REST` — not yet implemented.
-- 2026-07-23 — Minimal companion theme scaffolded at
-  `wp-content/themes/course-discovery-theme` (`style.css`, `functions.php`,
-  `header.php`, `footer.php`, `index.php`).
-- 2026-07-23 — `db/` wired into the `db` service at
-  `/docker-entrypoint-initdb.d` for local SQL dump/import; dump files
-  gitignored.
-- 2026-07-23 — Docker stack started locally for verification.
-- **Not yet done:** Course/Instructor/Provider post types, ACF field groups,
-  taxonomies, the filter pipeline and hook system, REST endpoints, frontend
-  UI, migrations/custom DB tables, and the test suite (unit/integration/
-  feature/e2e).
+## Table of Contents
 
-## Setup
+- [Setup Instructions](#setup-instructions)
+- [Environment Requirements](#environment-requirements)
+- [Database Setup](#database-setup)
+- [Development Commands](#development-commands)
+- [Testing Instructions](#testing-instructions)
+- [Architectural Decisions](#architectural-decisions)
+- [Performance & Scalability](#performance--scalability)
+- [Assumptions Made](#assumptions-made)
+- [Development Log](#development-log)
+
+## Setup Instructions
 
 1. Clone this repository.
-2. Copy any required environment files (see [Environment Requirements](#environment-requirements)).
-3. Start the stack:
+2. Start the stack from the repository root:
 
    ```bash
    docker compose up -d
    ```
 
-4. Visit `http://localhost:8080` and complete the WordPress install wizard.
-5. Activate the **Course Discovery** plugin and the **Course Discovery Theme**
-   from the WordPress admin.
+3. Visit **http://localhost:8080/wp-admin/install.php** and complete the
+   WordPress install wizard (site title, admin username/password/email).
+4. Log in to `/wp-admin/` and activate:
+   - **Plugins → Course Discovery**
+   - **Appearance → Themes → Course Discovery Theme**
+5. Visit **http://localhost:8080** to confirm the front end renders under
+   the Course Discovery theme.
+
+| Service    | URL                                              |
+|------------|---------------------------------------------------|
+| Site       | http://localhost:8080                              |
+| WP Admin   | http://localhost:8080/wp-admin/                    |
+| phpMyAdmin | http://localhost:8081                              |
+| MySQL      | `localhost:3306` (from host) / `db:3306` (in-network) |
 
 ## Environment Requirements
 
@@ -193,13 +201,13 @@ technologies.
 The `db` service provisions a MySQL 8.0 database automatically on first run,
 using the credentials below (development only — do not reuse in production):
 
-| Setting  | Value       |
-|----------|-------------|
-| Host     | `db` (or `localhost:3306` from the host) |
-| Database | `wordpress` |
-| User     | `wordpress` |
-| Password | `wordpress` |
-| Root pw  | `root`      |
+| Setting  | Value                                     |
+|----------|--------------------------------------------|
+| Host     | `db` (or `localhost:3306` from the host)    |
+| Database | `wordpress`                                 |
+| User     | `wordpress`                                 |
+| Password | `wordpress`                                 |
+| Root pw  | `root`                                      |
 
 phpMyAdmin is available at `http://localhost:8081` for inspecting the
 database directly.
@@ -220,7 +228,7 @@ docker compose exec -T db mysql -uwordpress -pwordpress wordpress < db/dump.sql
 
 Dump files in `db/` are gitignored and stay local.
 
-## Dev Commands
+## Development Commands
 
 Run these from `wp-content/plugins/course-discovery/`:
 
@@ -237,7 +245,7 @@ docker compose down        # stop the stack
 docker compose logs -f     # tail logs
 ```
 
-## Testing
+## Testing Instructions
 
 The plugin uses PHPUnit for automated tests, run via:
 
@@ -279,34 +287,27 @@ most likely to regress silently, since a wrong-but-similar SQL join can
 still return plausible-looking results.
 
 **Testing new filters** — because filters implement a shared
-`Filter` contract (see Architecture below), a generic contract test suite
-runs against every registered filter implementation, so a new filter is
-exercised the same way as existing ones without hand-writing bespoke
+`Filter` contract (see Architectural Decisions below), a generic contract test
+suite runs against every registered filter implementation, so a new filter
+is exercised the same way as existing ones without hand-writing bespoke
 plumbing each time; only its fixture data and expected cases need adding.
 
-## Architecture
+## Architectural Decisions
 
 The plugin follows a namespaced, PSR-4 structure under
 `OxfordInternational\CourseDiscovery`:
 
-- `Plugin.php` — bootstraps the plugin and wires up WordPress hooks.
-- `Domain/Model` — domain entities (`Course`, `Instructor`, `Provider`)
-  hydrated from `WP_Post` + ACF field data, not raw arrays.
-- `Domain/ValueObject` — immutable value objects (e.g. `Price`, `StartDate`,
-  a `PostId`/slug wrapper) so primitives never leak into the domain layer.
-- `Query` — a `WP_Query` abstraction (`CourseQuery`/`CourseQueryBuilder`)
-  that exposes a typed, fluent API instead of passing `WP_Query` arg arrays
-  around directly.
-- `Filter` — one class per filter (search, provider, location, start date,
-  category), each implementing a shared `Filter` interface with a method to
-  contribute to the query builder given selected criteria.
-- `PostType` — custom post type registrations (`course`, `instructor`,
-  `provider`).
-- `Taxonomy` — custom taxonomy registrations (hierarchical `course_category`).
-- `Migration` — versioned schema/data migration runners for any custom
-  tables (e.g. a course/provider/location lookup table).
-- `REST` — REST controllers exposing course search/filtering to the
-  frontend.
+| Namespace           | Responsibility |
+|---------------------|----------------|
+| `Plugin.php`         | Bootstraps the plugin and wires up WordPress hooks. |
+| `Domain/Model`       | Domain entities (`Course`, `Instructor`, `Provider`) hydrated from `WP_Post` + ACF field data, not raw arrays. |
+| `Domain/ValueObject` | Immutable value objects (e.g. `Price`, `StartDate`, a `PostId`/slug wrapper) so primitives never leak into the domain layer. |
+| `Query`              | A `WP_Query` abstraction (`CourseQuery`/`CourseQueryBuilder`) exposing a typed, fluent API instead of passing `WP_Query` arg arrays around directly. |
+| `Filter`             | One class per filter (search, provider, location, start date, category), each implementing a shared `Filter` interface with a method to contribute to the query builder given selected criteria. |
+| `PostType`           | Custom post type registrations (`course`, `instructor`, `provider`). |
+| `Taxonomy`           | Custom taxonomy registrations (hierarchical `course_category`). |
+| `Migration`          | Versioned schema/data migration runners for any custom tables (e.g. a course/provider/location lookup table). |
+| `REST`               | REST controllers exposing course search/filtering to the frontend. |
 
 The theme (`course-discovery-theme`) is intentionally minimal and exists to
 provide a rendering surface for the plugin during development.
@@ -401,7 +402,7 @@ but documented here as the intended evolution path.
   with WordPress remaining the system of record and the search index kept
   eventually consistent via the same save/delete hooks.
 
-## Assumptions
+## Assumptions Made
 
 - Local development only; the Docker Compose file and credentials in this
   repo are not intended for production use.
@@ -409,3 +410,35 @@ but documented here as the intended evolution path.
   versions is assumed.
 - Domain logic lives in the plugin, not the theme; the theme is a thin
   presentation layer.
+
+## Development Log
+
+<details>
+<summary>Dated progress log — click to expand</summary>
+
+- 2026-07-23 — Repository initialised; Docker Compose scaffolded
+  (WordPress 6.7/PHP 8.2, MySQL 8.0, phpMyAdmin on ports 8080/8081/3306).
+- 2026-07-23 — Plugin scaffold created at
+  `wp-content/plugins/course-discovery`: `composer.json` with PSR-4
+  autoloading (`OxfordInternational\CourseDiscovery\` → `src/`), main plugin
+  file with WordPress headers, and a `Plugin.php` bootstrap class wiring
+  `init` / `rest_api_init` / `plugins_loaded` hooks. Empty stub directories
+  created for `Domain/ValueObject`, `Domain/Model`, `Query`, `Filter`,
+  `PostType`, `Taxonomy`, `Migration`, `REST` — not yet implemented.
+- 2026-07-23 — Minimal companion theme scaffolded at
+  `wp-content/themes/course-discovery-theme` (`style.css`, `functions.php`,
+  `header.php`, `footer.php`, `index.php`).
+- 2026-07-23 — `db/` wired into the `db` service at
+  `/docker-entrypoint-initdb.d` for local SQL dump/import; dump files
+  gitignored.
+- 2026-07-23 — Docker stack started locally for verification.
+- 2026-07-23 — WordPress installed via the `/wp-admin/install.php` wizard;
+  **Course Discovery** plugin and **Course Discovery Theme** activated;
+  front end verified rendering under the new theme with no PHP errors in
+  the container logs.
+- **Not yet done:** Course/Instructor/Provider post types, ACF field groups,
+  taxonomies, the filter pipeline and hook system, REST endpoints, frontend
+  UI, migrations/custom DB tables, and the test suite (unit/integration/
+  feature/e2e).
+
+</details>
