@@ -25,7 +25,8 @@ project documentation and a running development log.
 | Domain model (value objects + `Course`/`Instructor`/`Provider`) | ✅ Implemented, 30 unit tests passing |
 | Post types, taxonomy, ACF field groups | ✅ Implemented, verified live |
 | Dummy data seeder (`bin/seed.php`) | ✅ Implemented |
-| Query builder, filter pipeline, REST endpoint | ⏳ Not started |
+| Query builder + filter pipeline | ✅ Implemented, verified against live seeded data, 25 unit tests passing |
+| REST endpoint | ⏳ Not started |
 | Frontend filter UI | ⏳ Not started |
 | Migrations / custom DB tables | ⏳ Not started |
 | Integration / feature / e2e tests | ⏳ Not started |
@@ -324,12 +325,16 @@ The plugin uses PHPUnit for automated tests, run via:
 composer test
 ```
 
-**Current coverage:** 30 unit tests over `Domain/ValueObject` (`PostId`,
-`Price`, `StartDate`, `Location`, `CategoryTerm`) and `Domain/Model`'s
-`Course::locations()` derivation logic — all run with no WordPress
-bootstrap, since the value objects and the tested model logic have no WP
-dependency. Integration, feature and e2e tests (below) land once the query
-builder, filter pipeline and REST endpoint exist to test against.
+**Current coverage:** 55 unit tests — `Domain/ValueObject` (`PostId`,
+`Price`, `StartDate`, `Location`, `CategoryTerm`), `Domain/Model`'s
+`Course::locations()` derivation logic, `Filter\FilterCriteria` parsing,
+every concrete `Filter`'s contribution to the query builder, the
+`FilterPipeline`'s end-to-end AND/OR composition, and
+`Query\CourseResultAssembler`'s filter/pagination math. All run with no
+WordPress bootstrap — including the filter/query logic, since predicates
+are tested against fabricated `Course` objects rather than a live
+`WP_Query`. Integration, feature and e2e tests (below) land once the REST
+endpoint exists to test against.
 
 ### Strategy (planned)
 
@@ -383,8 +388,8 @@ The plugin follows a namespaced, PSR-4 structure under
 | `PostType`           | Custom post type registrations (`course`, `instructor`, `provider`), each behind a `PostTypeRegistrar` interface and filterable via `course_discovery_post_types`. | ✅ Implemented |
 | `Taxonomy`           | Custom taxonomy registrations (hierarchical `course_category`), behind a `TaxonomyRegistrar` interface and filterable via `course_discovery_taxonomies`. | ✅ Implemented |
 | `Field`              | ACF field groups registered in code (`acf_add_local_field_group`) for Course and Provider, behind a `FieldGroupRegistrar` interface and filterable via `course_discovery_field_groups`. | ✅ Implemented |
-| `Query`              | A `WP_Query` abstraction (`CourseQuery`/`CourseQueryBuilder`) exposing a typed, fluent API instead of passing `WP_Query` arg arrays around directly. | ⏳ Planned |
-| `Filter`             | One class per filter (search, provider, location, start date, category), each implementing a shared `Filter` interface with a method to contribute to the query builder given selected criteria. | ⏳ Planned |
+| `Query`              | `CourseQueryBuilder` (a typed, fluent `WP_Query` abstraction), `CourseResultAssembler` (pure filter/pagination logic) and `CourseSearchClause` (widens search to the `short_description` ACF field). | ✅ Implemented |
+| `Filter`             | `FilterCriteria` plus one class per filter (search, provider, location, start date, category), each implementing a shared `Filter` interface, composed by `FilterPipeline`. | ✅ Implemented |
 | `Migration`          | Versioned schema/data migration runners for any custom tables (e.g. a course/provider/location lookup table). | ⏳ Planned |
 | `REST`               | REST controllers exposing course search/filtering to the frontend. | ⏳ Planned |
 
@@ -400,25 +405,46 @@ provide a rendering surface for the plugin during development.
 ### Design decisions
 
 - **Composition over inheritance.** Filters are separate, independently
-  testable classes composed by a `FilterPipeline`/registry rather than
-  built as subclasses of a base "filter" class. Each filter only needs to
-  know how to (a) describe its own available options and (b) contribute
-  its criteria to a query builder — nothing else depends on its internals.
-- **Specification-style composition for AND/OR grouping.** Selected filter
-  values are modelled as a small composite of value-object criteria: values
-  *within* one filter are combined with OR, and the filters themselves are
-  combined with AND, mirroring the brief's example
-  `(provider = A OR provider = B) AND (location = X OR location = Y)`. This
-  composition lives in one place (the query builder) rather than being
-  reimplemented per filter, so it can't drift between filter types.
-- **Hook/event pipeline for extensibility.** Rather than a fixed filter
-  list, filters register themselves against a `Filter` registry via a
-  WordPress action (e.g. `course_discovery_register_filters`), and the
-  query builder fires WordPress filters at key extension points — altering
-  available filter options, mutating query args before execution,
-  transforming raw search criteria, and customising result ordering. New
-  filters are addable by third-party code hooking in, with no changes to
-  existing filter classes.
+  testable classes composed by `FilterPipeline` rather than built as
+  subclasses of a base "filter" class. Each filter only needs to know how
+  to contribute its own criteria to a `CourseQueryBuilder` — nothing else
+  depends on its internals.
+- **Specification-style composition for AND/OR grouping.** `FilterCriteria`
+  holds the full selection as typed lists; each `Filter` combines *its own*
+  selected values with OR (an `IN` tax_query operator, or a predicate
+  matching any selected value), and `FilterPipeline`/`CourseQueryBuilder`/
+  `CourseResultAssembler` require every filter to match, i.e. AND across
+  filters — mirroring the brief's example
+  `(provider = A OR provider = B) AND (location = X OR location = Y)`. The
+  AND-across-filters composition lives in one place (the assembler) rather
+  than being reimplemented per filter, so it can't drift between filter
+  types.
+- **SQL-native filtering where it's reliable, in-PHP where it isn't.**
+  `CategoryFilter` pushes down into a real `tax_query` clause, since
+  categories are an indexed WordPress taxonomy relationship. `Provider`,
+  `Location` and `StartDate` filter as in-PHP predicates over already-
+  hydrated `Course` objects instead: ACF stores those fields as a single
+  serialized value per post, and a `meta_query` `LIKE`/`IN` match against
+  that serialized value risks false positives against the array's own
+  index tokens, not just its stored values — exactly the "wrong-but-
+  similar SQL join" the Testing Instructions flag as highest regression
+  risk. Matching against typed, already-parsed domain objects removes that
+  ambiguity entirely, at the cost of fetching the full candidate set
+  before pagination (see `CourseQueryBuilder`'s docblock, and Performance &
+  Scalability for the evolution path).
+- **Hook/event pipeline for extensibility.** Filters register themselves
+  via `course_discovery_filters`; `CourseQueryBuilder` fires
+  `course_discovery_query_args` (modify `WP_Query` args before execution)
+  and `course_discovery_order_courses` (customise result ordering, over
+  the hydrated `Course` list rather than just `WP_Query`'s `orderby`);
+  `FilterCriteria::fromArray()` fires `course_discovery_transform_criteria`
+  (rewrite raw search criteria before it's typed). New filters, altered
+  query args, or custom ordering are all addable by third-party code
+  hooking in, with no changes to existing filter classes. The one
+  extension point named in the brief not yet wired up is altering
+  available filter *options* (e.g. the list of Providers shown in a
+  dropdown) — there's nothing to filter yet until the REST endpoint/
+  frontend expose those option lists.
 - **`WP_Query` abstraction.** Domain code never builds raw `WP_Query` arg
   arrays inline; a query builder translates typed filter criteria into
   `WP_Query`/`WP_Meta_Query`/`WP_Tax_Query` arguments in one place, which is
@@ -563,8 +589,26 @@ but documented here as the intended evolution path.
   errors or deprecation notices in the container logs. Also hit the same
   "Plain" permalink default as the original install and fixed it the same
   way (see the previous entry).
-- **Not yet done:** the query builder, the filter pipeline and hook
-  system, REST endpoints, frontend UI, migrations/custom DB tables, and
-  integration/feature/e2e tests.
+- 2026-07-23 — Implemented the query builder and filter pipeline:
+  `Filter\FilterCriteria`, the `Filter` interface, five concrete filters
+  (search, provider, location, category, start date), `FilterPipeline`,
+  `Query\CourseQueryBuilder`, `CourseResultAssembler` and
+  `CourseSearchClause`. Category filtering pushes into a real `tax_query`;
+  Provider/Location/StartDate filter as in-PHP predicates over hydrated
+  `Course` objects instead of a `meta_query`, since ACF's serialized
+  storage for those fields isn't reliably `LIKE`/`IN`-matchable (see
+  Architectural Decisions). Added 25 unit tests (55/55 total, no
+  WordPress bootstrap needed even for the filter/AND-OR logic, since it's
+  tested against fabricated `Course` objects). Verified live against the
+  real seeded data: unfiltered listing paginates correctly (16 courses,
+  2 pages); category-only, combined AND-across-filters, and a
+  deliberately contradictory combination (expecting zero results) all
+  returned exactly the expected courses; confirmed the widened search
+  matches a term that exists *only* in a course's `short_description`
+  field (not title/content), proving `CourseSearchClause`'s join actually
+  extends WordPress's default search rather than just coincidentally
+  overlapping with it. No PHP errors in the container logs.
+- **Not yet done:** REST endpoints, frontend UI, migrations/custom DB
+  tables, and integration/feature/e2e tests.
 
 </details>
