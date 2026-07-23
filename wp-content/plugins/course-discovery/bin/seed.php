@@ -370,6 +370,11 @@ foreach ($courses as $course) {
         static fn (string $name): int => $categoryIds[$name],
         $course['categories'],
     ), 'course_category');
+
+    // update_field() writes postmeta directly and never fires save_post_course,
+    // so Migration\FilterIndexSync would never see this course's real data
+    // without an explicit re-save now that every ACF field is set.
+    wp_update_post(['ID' => $courseId]);
 }
 
 printf(

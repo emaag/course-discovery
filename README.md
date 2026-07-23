@@ -30,7 +30,7 @@ project documentation and a running development log.
 | Query builder + filter pipeline | ✅ Implemented, verified against live seeded data, 25 unit tests passing |
 | REST endpoint (`course-discovery/v1/courses`, `/filters`) | ✅ Implemented, verified live |
 | Frontend filter UI | ✅ Implemented, verified live |
-| Migrations / custom DB tables | ⏳ Not started |
+| Migrations / custom DB tables | ✅ Implemented, verified live |
 | Integration / feature tests (`WP_UnitTestCase`) | ✅ Implemented — 20 tests |
 | End-to-end (browser) tests | ⏳ Not started |
 
@@ -365,26 +365,30 @@ docker compose exec -T db mysql -uroot -proot -e \
   "CREATE DATABASE IF NOT EXISTS wordpress_test; GRANT ALL PRIVILEGES ON wordpress_test.* TO 'wordpress'@'%';"
 ```
 
-**Current coverage:** 59 unit tests — `Domain/ValueObject` (`PostId`,
+**Current coverage:** 62 unit tests — `Domain/ValueObject` (`PostId`,
 `Price`, `StartDate`, `Location`, `CategoryTerm`), `Domain/Model`'s
 `Course::locations()` derivation logic, `Filter\FilterCriteria` parsing,
 every concrete `Filter`'s contribution to the query builder, the
 `FilterPipeline`'s end-to-end AND/OR composition,
-`Query\CourseResultAssembler`'s filter/pagination math, and
-`REST\CourseTransformer`'s Course→JSON conversion — all with no WordPress
-bootstrap, since predicates and serialisation are tested against
-fabricated `Course` objects.
+`Query\CourseResultAssembler`'s filter/pagination math,
+`REST\CourseTransformer`'s Course→JSON conversion, and
+`Migration\FilterIndexSync`'s row-computation logic — all with no
+WordPress bootstrap, since predicates and serialisation are tested
+against fabricated `Course` objects.
 
-Plus **20 integration tests** (`wp-phpunit` + `yoast/phpunit-polyfills`,
-against the plugin's own real WordPress install) across four suites:
+Plus **25 integration tests** (`wp-phpunit` + `yoast/phpunit-polyfills`,
+against the plugin's own real WordPress install) across five suites:
 `FilterPipelineIntegrationTest` (the brief's AND/OR composition against
 real posts/ACF data — the highest-risk area), `CourseQueryBuilderIntegrationTest`
 (search across all three text fields, real `tax_query` behaviour
 including child-term inclusion, pagination math against a real result
 set, ACF hydration end to end), `RestEndpointIntegrationTest` (the actual
 registered routes dispatched through `WP_REST_Server`, not just direct
-PHP calls), and `StartDateFilterIntegrationTest` (chronological ordering
-and single/multi start-date filtering).
+PHP calls), `StartDateFilterIntegrationTest` (chronological ordering and
+single/multi start-date filtering), and `FilterIndexSyncIntegrationTest`
+(the migration actually created both lookup tables, and saving/deleting/
+unpublishing a real Course keeps them in sync via the real
+`save_post_course`/`before_delete_post` hooks).
 
 ### Strategy
 
@@ -445,7 +449,7 @@ The plugin follows a namespaced, PSR-4 structure under
 | `Field`              | ACF field groups registered in code (`acf_add_local_field_group`) for Course and Provider, behind a `FieldGroupRegistrar` interface and filterable via `course_discovery_field_groups`. | ✅ Implemented |
 | `Query`              | `CourseQueryBuilder` (a typed, fluent `WP_Query` abstraction), `CourseResultAssembler` (pure filter/pagination logic), `CourseSearchClause` (widens search to the `short_description` ACF field) and `FilterOptionsProvider` (available filter option lists). | ✅ Implemented |
 | `Filter`             | `FilterCriteria` plus one class per filter (search, provider, location, start date, category), each implementing a shared `Filter` interface, composed by `FilterPipeline`. | ✅ Implemented |
-| `Migration`          | Versioned schema/data migration runners for any custom tables (e.g. a course/provider/location lookup table). | ⏳ Planned |
+| `Migration`          | `MigrationRunner` (tracks applied migrations via an option) running `CreateFilterIndexTables` (two lookup tables — see Design Decisions), kept in sync by `FilterIndexSync` on save/delete. | ✅ Implemented |
 | `REST`               | `CourseSearchController` (`GET /courses` — filtered, paginated search) and `FilterOptionsController` (`GET /filters` — available option lists), plus `CourseTransformer` for Course→JSON serialisation, behind a `RestController` interface filterable via `course_discovery_rest_controllers`. | ✅ Implemented |
 | `Frontend`           | `CourseArchiveTemplate` (serves the plugin's own course-listing template at the site's front page `/`, 301-redirecting the Course post type's own `/courses/` archive URL there) and `FilterFieldRenderer` (the multi-select filter disclosures). | ✅ Implemented |
 
@@ -505,6 +509,22 @@ provide a rendering surface for the plugin during development.
   Course rather than listing all Providers/Categories that exist — so an
   option that wouldn't return anything (e.g. a Provider with no Course
   assigned yet) never appears as a selectable filter value.
+- **Two focused lookup tables, not one wide cross-product table.**
+  `CreateFilterIndexTables` creates `course_discovery_course_providers`
+  (course_id, provider_id, location_slug) and
+  `course_discovery_course_start_dates` (course_id, start_date) — kept
+  live by `FilterIndexSync` on every Course save/delete. A course with 2
+  providers and 3 start dates needs 5 rows split across two single-
+  purpose tables rather than 6 in one table crossing every dimension
+  together, and each table stays independently indexable. Categories
+  aren't duplicated here — `course_category` is a real taxonomy already
+  backed by an indexed join (`wp_term_relationships`). **Not yet wired
+  into `CourseQueryBuilder`**: the existing in-PHP-predicate filters are
+  simpler, already thoroughly tested, and correct at this project's
+  scale — these tables exist and stay accurate as the documented
+  Performance & Scalability evolution path, ready to become the query
+  source without a risky "build the index and cut over in the same
+  change" step.
 - **`WP_Query` abstraction.** Domain code never builds raw `WP_Query` arg
   arrays inline; a query builder translates typed filter criteria into
   `WP_Query`/`WP_Meta_Query`/`WP_Tax_Query` arguments in one place, which is
@@ -581,15 +601,23 @@ but documented here as the intended evolution path.
   and doesn't scale or rank well. A MySQL `FULLTEXT` index on those columns
   (via a denormalised read table, since core WP post tables aren't set up
   for it) is a reasonable mid-scale step.
-- **Evolution path.** Roughly: (1) current — `WP_Query` + meta/tax queries,
-  fine at low volume; (2) introduce a denormalised `course_filter_index`
-  lookup table kept in sync via save/delete hooks, once meta-query joins
-  show up as slow; (3) add caching around option lists and common filter
-  results; (4) once full-text relevance/ranking or facet counts at scale
-  become necessary (hundreds of thousands to millions of courses), move
-  search to an external engine (e.g. Elasticsearch/OpenSearch or Algolia),
-  with WordPress remaining the system of record and the search index kept
-  eventually consistent via the same save/delete hooks.
+- **Evolution path.** Roughly: (1) current — `tax_query` for categories,
+  in-PHP predicates over the full matching set for provider/location/
+  start date, fine at low volume; (2) **already built**: two denormalised
+  lookup tables (`course_discovery_course_providers`,
+  `course_discovery_course_start_dates`, see Architectural Decisions),
+  kept in sync via `FilterIndexSync` on every save/delete — not yet
+  wired into `CourseQueryBuilder` as the query source, so the next step
+  is cutting the relevant filters over to indexed `JOIN`s against these
+  tables once in-PHP filtering stops being fast enough, with the sync
+  itself already proven correct by
+  `FilterIndexSyncIntegrationTest`; (3) add caching around option lists
+  and common filter results; (4) once full-text relevance/ranking or
+  facet counts at scale become necessary (hundreds of thousands to
+  millions of courses), move search to an external engine (e.g.
+  Elasticsearch/OpenSearch or Algolia), with WordPress remaining the
+  system of record and the search index kept eventually consistent via
+  the same save/delete hooks.
 
 ## Assumptions Made
 
@@ -783,7 +811,22 @@ but documented here as the intended evolution path.
   the guard (WordPress's `add_filter()` already dedupes identical
   callback+priority registrations, so there's no double-execution risk).
   Full suite: 59 unit + 20 integration, all passing.
-- **Not yet done:** migrations/custom DB tables, and end-to-end
-  (browser-driven) tests.
+- 2026-07-23 — Added migrations/custom DB tables: `MigrationRunner` +
+  `CreateFilterIndexTables` (two lookup tables — `course_discovery_
+  course_providers`, `course_discovery_course_start_dates` — deliberately
+  two focused junction tables rather than one wide cross-product table;
+  see Architectural Decisions), kept in sync via `FilterIndexSync` on
+  `save_post_course`/`before_delete_post`. Not yet wired into
+  `CourseQueryBuilder` as a query source — see Performance & Scalability's
+  evolution path for why. Added 3 unit tests (pure row-computation) and 5
+  integration tests (table creation, sync on publish/re-save/delete/
+  unpublish). Found a real gap while verifying live: ACF's `update_field()`
+  writes postmeta directly and never fires `save_post_course`, so
+  `bin/seed.php`'s courses never reached the sync — fixed by adding a
+  `wp_update_post()` call after each course's fields are set. Verified
+  live: both tables populate correctly (20 provider rows, 22 start-date
+  rows across 16 reseeded courses), no errors. Full suite: 62 unit + 25
+  integration, all passing.
+- **Not yet done:** end-to-end (browser-driven) tests.
 
 </details>

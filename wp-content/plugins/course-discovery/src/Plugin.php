@@ -8,6 +8,10 @@ use OxfordInternational\CourseDiscovery\Field\CourseFieldGroup;
 use OxfordInternational\CourseDiscovery\Field\FieldGroupRegistrar;
 use OxfordInternational\CourseDiscovery\Field\ProviderFieldGroup;
 use OxfordInternational\CourseDiscovery\Frontend\CourseArchiveTemplate;
+use OxfordInternational\CourseDiscovery\Migration\CreateFilterIndexTables;
+use OxfordInternational\CourseDiscovery\Migration\FilterIndexSync;
+use OxfordInternational\CourseDiscovery\Migration\Migration;
+use OxfordInternational\CourseDiscovery\Migration\MigrationRunner;
 use OxfordInternational\CourseDiscovery\PostType\CoursePostType;
 use OxfordInternational\CourseDiscovery\PostType\InstructorPostType;
 use OxfordInternational\CourseDiscovery\PostType\PostTypeRegistrar;
@@ -40,6 +44,7 @@ final class Plugin
         add_action('plugins_loaded', [$this, 'runMigrations']);
 
         (new CourseArchiveTemplate())->registerHooks();
+        (new FilterIndexSync())->registerHooks();
     }
 
     public function registerPostTypes(): void
@@ -111,6 +116,13 @@ final class Plugin
 
     public function runMigrations(): void
     {
-        // Migration runners live in src/Migration.
+        /**
+         * @param list<Migration> $migrations
+         */
+        $migrations = apply_filters('course_discovery_migrations', [
+            new CreateFilterIndexTables(),
+        ]);
+
+        (new MigrationRunner())->run($migrations);
     }
 }
