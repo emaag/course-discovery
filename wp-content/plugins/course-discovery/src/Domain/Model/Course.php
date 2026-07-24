@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace OxfordInternational\CourseDiscovery\Domain\Model;
 
+use InvalidArgumentException;
 use OxfordInternational\CourseDiscovery\Domain\ValueObject\CategoryTerm;
 use OxfordInternational\CourseDiscovery\Domain\ValueObject\Location;
 use OxfordInternational\CourseDiscovery\Domain\ValueObject\PostId;
@@ -166,7 +167,21 @@ final class Course
                 continue;
             }
 
-            $dates[] = StartDate::fromString($value);
+            try {
+                $dates[] = StartDate::fromString($value);
+            } catch (InvalidArgumentException) {
+                // The ACF field is free text with no format enforcement
+                // beyond the acf/validate_value guard registered by
+                // Field\CourseFieldGroup — that only stops new bad entries,
+                // not data already in the database (a direct DB edit, an
+                // older row, a future import). Skip rather than let one
+                // malformed date take down every page that lists courses.
+                error_log(sprintf(
+                    'Course Discovery: skipping malformed start_date "%s" on course %d.',
+                    $value,
+                    $postId,
+                ));
+            }
         }
 
         usort($dates, static fn (StartDate $a, StartDate $b): int => $a->compareTo($b));
