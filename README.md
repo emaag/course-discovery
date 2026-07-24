@@ -242,6 +242,22 @@ use the `http://` URL above in the meantime.
 | MySQL | 8.0 | Provisioned by the `db` service. |
 | Composer | 2.x | Only needed on the host to install plugin dependencies and run tests (`wp-content/plugins/course-discovery/`) — not required inside the container. |
 
+**WordPress 7.0.2 is a security release** (17 July 2026), patching a
+critical pre-authentication RCE chain (dubbed "wp2shell": CVE-2026-63030,
+a route-confusion issue in WordPress core's built-in REST batch endpoint
+— `/wp-json/batch/v1` — chained into the SQL injection in
+CVE-2026-60137, in `WP_Query`'s `author__not_in` parameter). This
+plugin's own REST endpoints (`course-discovery/v1/courses`,
+`.../filters`) are unaffected by that specific vector regardless of core
+version: both are registered read-only (`WP_REST_Server::READABLE`/
+`GET` only, in `REST/CourseSearchController` and
+`REST/FilterOptionsController`), take typed/sanitised input (declared
+arg schemas, `sanitize_text_field` for search), never accept or forward
+an `author__not_in` parameter, and aren't consumed through core's
+batch-request mechanism. Pinning to 7.0.2 patches the vulnerability at
+the WordPress core level either way — this is why, not a claim that the
+plugin's own endpoints were ever independently vulnerable.
+
 ## Database Setup
 
 The `db` service provisions a MySQL 8.0 database automatically on first run,
