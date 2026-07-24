@@ -379,19 +379,20 @@ Assumes the local stack is up and seeded (`bin/seed.php`) — the tests
 assert against that exact dataset (16 courses, 3 tagged "Graphic
 Design"). Point elsewhere with `COURSE_DISCOVERY_BASE_URL=https://...`.
 
-**Current coverage:** 62 unit tests — `Domain/ValueObject` (`PostId`,
+**Current coverage:** 69 unit tests — `Domain/ValueObject` (`PostId`,
 `Price`, `StartDate`, `Location`, `CategoryTerm`), `Domain/Model`'s
 `Course::locations()` derivation logic, `Filter\FilterCriteria` parsing,
 every concrete `Filter`'s contribution to the query builder, the
 `FilterPipeline`'s end-to-end AND/OR composition,
 `Query\CourseResultAssembler`'s filter/pagination math,
-`REST\CourseTransformer`'s Course→JSON conversion, and
-`Migration\FilterIndexSync`'s row-computation logic — all with no
-WordPress bootstrap, since predicates and serialisation are tested
-against fabricated `Course` objects.
+`REST\CourseTransformer`'s Course→JSON conversion,
+`Migration\FilterIndexSync`'s row-computation logic, and
+`Field\CourseFieldGroup`'s start-date validation — all with no WordPress
+bootstrap, since predicates and serialisation are tested against
+fabricated `Course` objects.
 
-Plus **25 integration tests** (`wp-phpunit` + `yoast/phpunit-polyfills`,
-against the plugin's own real WordPress install) across five suites:
+Plus **32 integration tests** (`wp-phpunit` + `yoast/phpunit-polyfills`,
+against the plugin's own real WordPress install) across seven suites:
 `FilterPipelineIntegrationTest` (the brief's AND/OR composition against
 real posts/ACF data — the highest-risk area), `CourseQueryBuilderIntegrationTest`
 (search across all three text fields, real `tax_query` behaviour
@@ -399,10 +400,18 @@ including child-term inclusion, pagination math against a real result
 set, ACF hydration end to end), `RestEndpointIntegrationTest` (the actual
 registered routes dispatched through `WP_REST_Server`, not just direct
 PHP calls), `StartDateFilterIntegrationTest` (chronological ordering and
-single/multi start-date filtering), and `FilterIndexSyncIntegrationTest`
+single/multi start-date filtering), `FilterIndexSyncIntegrationTest`
 (the migration actually created both lookup tables, and saving/deleting/
 unpublishing a real Course keeps them in sync via the real
-`save_post_course`/`before_delete_post` hooks).
+`save_post_course`/`before_delete_post` hooks),
+`ExtensibilityHooksIntegrationTest` (each of the five extensibility
+examples the brief names — registering a new filter, modifying query
+args, customising ordering, transforming raw criteria, altering filter
+options — proven with a real third-party `add_filter()` callback that
+never touches an existing class), and
+`MalformedStartDateIntegrationTest` (a start date written directly to
+postmeta, bypassing ACF's own validation entirely, is skipped rather
+than crashing every page that lists courses).
 
 ### Strategy
 
@@ -480,7 +489,7 @@ The plugin follows a namespaced, PSR-4 structure under
 | `Domain/ValueObject` | Immutable value objects (`Price`, `StartDate`, `PostId`, `Location`, `CategoryTerm`) so primitives never leak into the domain layer. | ✅ Implemented |
 | `PostType`           | Custom post type registrations (`course`, `instructor`, `provider`), each behind a `PostTypeRegistrar` interface and filterable via `course_discovery_post_types`. | ✅ Implemented |
 | `Taxonomy`           | Custom taxonomy registrations (hierarchical `course_category`), behind a `TaxonomyRegistrar` interface and filterable via `course_discovery_taxonomies`. | ✅ Implemented |
-| `Field`              | ACF field groups registered in code (`acf_add_local_field_group`) for Course and Provider, behind a `FieldGroupRegistrar` interface and filterable via `course_discovery_field_groups`. | ✅ Implemented |
+| `Field`              | ACF field groups registered in code (`acf_add_local_field_group`) for Course and Provider, behind a `FieldGroupRegistrar` interface and filterable via `course_discovery_field_groups`. `CourseFieldGroup` also validates the start date sub-field at admin data-entry time (`acf/validate_value`), reusing `StartDate`'s own parser. | ✅ Implemented |
 | `Query`              | `CourseQueryBuilder` (a typed, fluent `WP_Query` abstraction), `CourseResultAssembler` (pure filter/pagination logic), `CourseSearchClause` (widens search to the `short_description` ACF field) and `FilterOptionsProvider` (available filter option lists). | ✅ Implemented |
 | `Filter`             | `FilterCriteria` plus one class per filter (search, provider, location, start date, category), each implementing a shared `Filter` interface, composed by `FilterPipeline`. | ✅ Implemented |
 | `Migration`          | `MigrationRunner` (tracks applied migrations via an option) running `CreateFilterIndexTables` (two lookup tables — see Design Decisions), kept in sync by `FilterIndexSync` on save/delete. | ✅ Implemented |
@@ -537,7 +546,10 @@ provide a rendering surface for the plugin during development.
   Location/Category/StartDate option lists returned to the frontend). New
   filters, altered query args, custom ordering, or altered filter options
   are all addable by third-party code hooking in, with no changes to any
-  existing filter/controller class.
+  existing filter/controller class — proven, not just asserted:
+  `ExtensibilityHooksIntegrationTest` registers a real `add_filter()`
+  callback against each of these five hooks and confirms the resulting
+  behaviour actually changes.
 - **Filter options derived from live data, not configuration.** `GET
   /filters` computes its option lists by walking every currently published
   Course rather than listing all Providers/Categories that exist — so an
@@ -595,6 +607,18 @@ provide a rendering surface for the plugin during development.
   browser for free and works with JavaScript entirely disabled, which a
   custom combobox's hand-rolled keyboard handling can't guarantee — see
   the class's own docblock, and Assumptions Made below.
+- **Malformed start dates are prevented at entry and tolerated at read
+  time — two layers, not one.** `Field\CourseFieldGroup` validates the
+  `start_date` sub-field via `acf/validate_value`, rejecting anything
+  that doesn't parse as `StartDate` before it ever reaches the database.
+  But `acf/validate_value` only runs for the real wp-admin form — ACF's
+  own `update_field()` API, a row written before validation existed, or
+  a future import script all bypass it entirely. So
+  `Course::hydrateStartDates()` also catches a malformed value and skips
+  it (logging why) rather than letting one bad row throw an uncaught
+  exception that would take down every page that lists courses — the
+  REST API, the frontend, everything. Found this gap and fixed both
+  layers together; see `MalformedStartDateIntegrationTest`.
 
 ## Performance & Scalability
 
@@ -885,8 +909,45 @@ but documented here as the intended evolution path.
   a full clean run in this session**; needs running for real on a
   machine (or CI) where `npx playwright install --with-deps` can
   actually install its system dependencies.
+- 2026-07-24 — Did a meticulous pass over the task brief against the
+  actual implementation, rather than just re-reading prose. Found and
+  fixed three real issues:
+  - Two false claims in this README ("a generic contract test suite runs
+    against every registered filter" and "run in CI on every change" —
+    neither was ever built) and one leaked internal note-taking artifact.
+  - **None of the five extensibility hooks the brief names as examples
+    had any test proving a third party could actually use them** —
+    despite all five being wired into real code. Added
+    `ExtensibilityHooksIntegrationTest`: a real `add_filter()` callback
+    against each of `course_discovery_filters`, `course_discovery_query_args`,
+    `course_discovery_order_courses`, `course_discovery_transform_criteria`,
+    and `course_discovery_filter_options`, confirming the resulting
+    behaviour actually changes. All five passed first try.
+  - **A real production bug**: the `start_dates` ACF field had no format
+    enforcement at all — an admin typo (or any non-admin-form write,
+    since ACF's own `update_field()` bypasses form validation too) would
+    throw an uncaught exception in `Course::hydrateStartDates()`,
+    fatal-erroring every page that lists courses. Fixed with two layers:
+    `Field\CourseFieldGroup::validateStartDate()` rejects malformed input
+    at the real admin form via `acf/validate_value`; `Course::fromPost()`
+    now also catches and skips (logging why) a malformed value from any
+    other source, so one bad row can degrade gracefully instead of
+    taking the whole site down.
+  - Also verified directly (not just claimed): exactly the two allowed
+    plugins (ACF + Course Discovery) are active on both local and
+    production, every public method/property in `src/` is typed (a full
+    grep audit, zero gaps), and the Categories taxonomy meta box
+    genuinely renders on the Course edit screen.
+  - Re-attempted a clean e2e run with an isolated single-spec-file
+    invocation to rule out cross-file interference; got the same
+    "browser closed" pattern on a near-identical Space-key test right
+    after an Enter-key test passed — reconfirms this is the
+    `--single-process` environment artifact already documented, not a
+    fresh finding, so did not keep chasing it further.
+  - Full suite: 69 unit + 32 integration, all passing.
 - **Not yet done:** nothing outstanding from the brief's testing
-  requirements — the e2e suite above is the last piece, pending a real
-  run outside this sandboxed session (see above).
+  requirements — the e2e suite is written and partially verified; a full
+  clean run needs a normally-provisioned environment outside this
+  sandboxed session (see above).
 
 </details>
