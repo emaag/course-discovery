@@ -18,7 +18,7 @@ This is a pre-interview technical exercise for Oxford International. The
 verbatim task brief is preserved below for reference, followed by the
 project documentation and a running development log.
 
-**Live deployment:** [courses.statichex.dev](http://courses.statichex.dev)
+**Live deployment:** [courses.statichex.dev](https://courses.statichex.dev)
 
 ### Status at a glance
 
@@ -224,13 +224,13 @@ technologies.
 
 ## Production Deployment
 
-The live deployment is at **[courses.statichex.dev](http://courses.statichex.dev)**,
+The live deployment is at **[courses.statichex.dev](https://courses.statichex.dev)**,
 on shared cPanel hosting rather than Docker — that environment has no
 Docker/root access, so it runs WordPress, the plugin and ACF directly
 under PHP-FPM, with its own isolated MySQL database. Same codebase, same
-plugin/theme, seeded with `bin/seed.php`. HTTPS is available but currently
-shows a certificate mismatch (AutoSSL for the subdomain hasn't run yet) —
-use the `http://` URL above in the meantime.
+plugin/theme, seeded with `bin/seed.php`. HTTPS is live (Namecheap support
+enabled the AutoSSL feature on the account, which had been switched off
+at the package level).
 
 ## Environment Requirements
 
