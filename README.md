@@ -34,7 +34,7 @@ project documentation and a running development log.
 | Admin dashboard (Course list table columns) | ✅ Implemented, verified via integration tests |
 | Static analysis (PHPStan, level 8) | ✅ Implemented, clean (`composer stan`) |
 | Integration / feature tests (`WP_UnitTestCase`) | ✅ Implemented — 37 tests |
-| End-to-end (browser) tests | ✅ Implemented — written, partially verified (see Development Log) |
+| End-to-end (browser) tests | ✅ Implemented and verified — 17/17 passing |
 
 Full detail is in [Architectural Decisions](#architectural-decisions) and the
 [Development Log](#development-log) at the bottom of this file.
@@ -1054,5 +1054,28 @@ but documented here as the intended evolution path.
   actual Playwright run against a running instance was possible; the
   new/changed specs need a real run before being trusted, same as the
   rest of the e2e suite.
+- 2026-07-25 — Got a real Playwright run: Docker Desktop's WSL integration
+  setting already listed this distro as integrated, but the CLI symlinks
+  had never actually been installed into it — `docker desktop restart`
+  (the supported fix) hung mid-stop, so its processes were force-killed
+  and it was relaunched fresh, which resolved it (`docker`/`docker
+  compose` both now work natively in this WSL distro, no more Windows-
+  path workaround). Brought the existing stack back up
+  (`docker compose up -d` against the existing volumes — no
+  reprovisioning needed) and confirmed the bind mounts were healthy (see
+  the known flakiness note in Architectural Decisions/dev notes) before
+  trusting anything. Headless Chromium was still missing `libnspr4`/
+  `libnss3` system libraries in this WSL distro (this session had no
+  passwordless sudo); installed via `sudo apt-get install -y libnspr4
+  libnss3` (not `libnssutil3` — that `.so` ships inside the `libnss3`
+  package itself, there's no separate Ubuntu package by that name).
+  **All 17 e2e tests passed on a real run** (`combobox-filters.spec.js`'s
+  8 tests against the new ARIA widget, `filter-narrows-results.spec.js`'s
+  4, `keyboard-operability.spec.js`'s 5) — confirming the combobox rework
+  actually works in a real browser, not just on inspection. Also
+  re-ran everything else for a fully green board in one pass: 69 unit +
+  37 integration (`wordpress_test` DB created fresh) + PHPStan, all
+  clean. Nothing outstanding from the brief's testing requirements
+  remains unverified.
 
 </details>
