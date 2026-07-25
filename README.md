@@ -232,9 +232,25 @@ The live deployment is at **[courses.statichex.dev](https://courses.statichex.de
 on shared cPanel hosting rather than Docker — that environment has no
 Docker/root access, so it runs WordPress, the plugin and ACF directly
 under PHP-FPM, with its own isolated MySQL database. Same codebase, same
-plugin/theme, seeded with `bin/seed.php`. HTTPS is live (Namecheap support
-enabled the AutoSSL feature on the account, which had been switched off
-at the package level).
+plugin/theme, seeded with `bin/seed.php`.
+
+**HTTPS** is served by a self-managed Let's Encrypt certificate
+([acme.sh](https://github.com/acmesh-official/acme.sh), installed under
+the account's home directory, no root needed), not cPanel's built-in
+AutoSSL — that feature is disabled at the hosting-package level
+(`uapi SSL get_autossl_problems` → `"You do not have the feature
+'autossl'"`) and, on this account, re-disables itself even after
+Namecheap support manually re-enables it. `acme.sh` issues the cert via
+HTTP-01 webroot validation and installs it through `uapi SSL
+install_ssl` — a separate API from the gated AutoSSL feature, so it
+works regardless. A reload hook re-installs the renewed cert into
+cPanel automatically after every renewal (a cron job checks
+periodically; Let's Encrypt certs are short-lived), so this shouldn't
+need manual attention going forward. This matters more than it might
+for a non-`.dev` domain: `.dev` is on every major browser's hardcoded
+HSTS-preload list, so a broken cert there makes the site completely
+unreachable over plain HTTP too — there's no insecure fallback a real
+visitor's browser will allow.
 
 ## Environment Requirements
 
@@ -1195,5 +1211,34 @@ but documented here as the intended evolution path.
   2 new e2e tests (19 total); re-ran the full suite for real (77 unit +
   37 integration + 19 e2e + PHPStan) rather than trusting it on
   inspection — all green, no PHP errors in the container logs.
+- 2026-07-25 — Deployed the 13 commits accumulated above to production
+  (`git pull` + `composer install --no-dev` + rsync into `public_html`,
+  per the redeploy process — verified via `diff -rq` against the git
+  checkout, not just assumed). Also removed `litespeed-cache`, a third
+  active plugin found on the production account alongside ACF and this
+  plugin (the brief requires no external plugins except ACF) — its
+  removal also purged a stale full-page cache that had been masking the
+  deploy. Then found HTTPS was broken again: cPanel's AutoSSL feature is
+  disabled at the hosting-package level, and — new information — the
+  Namecheap-support fix from earlier this same day hadn't actually
+  lasted. Worse than "HTTPS down, HTTP still works": `.dev` is
+  HSTS-preloaded in every major browser, so the site was unreachable by
+  any real visitor, full stop. Fixed it for real and durably this time:
+  installed `acme.sh` under the account's home directory (no root
+  needed), issued a cert via HTTP-01 webroot validation, and installed
+  it via `uapi SSL install_ssl` — a separate API from the gated AutoSSL
+  feature, unaffected by that restriction — then wired up a reload hook
+  + cron job so future renewals install themselves automatically,
+  independent of AutoSSL ever working again. Verified with the actual
+  Playwright suite against `https://courses.statichex.dev` over a real
+  HTTPS connection: 19/19 passing. (One follow-up wrinkle: chased a
+  theory that the issued cert's newer root chain — `ISRG Root X2`/"Root
+  Y*", introduced 2026-05-13 — might not yet be trusted by some mobile
+  OS trust stores, after a phone report of the site not loading;
+  reissuing as RSA landed on the same new root hierarchy, and the
+  original chain does properly cross-sign back to the long-trusted
+  `ISRG Root X1`, so left it as originally issued rather than chase
+  further — the phone issue turned out to be transient and resolved on
+  its own.)
 
 </details>
