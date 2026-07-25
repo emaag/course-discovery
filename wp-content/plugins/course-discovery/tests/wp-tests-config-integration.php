@@ -1,10 +1,14 @@
 <?php
 
 /**
- * Config for the WP_UnitTestCase integration suite. Only valid when run
- * from inside the wordpress container (`docker compose exec wordpress
- * php vendor/bin/phpunit -c phpunit-integration.xml.dist`) — ABSPATH and
- * DB_HOST both assume that environment, not the host machine.
+ * Config for the WP_UnitTestCase integration suite. DB_* default to the
+ * Docker Compose `db` service's credentials, and ABSPATH defaults to
+ * `/var/www/html/` — correct when run from inside the wordpress
+ * container (`docker compose exec wordpress php vendor/bin/phpunit -c
+ * phpunit-integration.xml.dist`). All of it is overridable via
+ * WP_TESTS_DB_* and WP_TESTS_ABSPATH env vars so the same suite also
+ * runs in CI against a plain downloaded WordPress core + MySQL service,
+ * with no container involved — see .github/workflows/ci.yml.
  */
 
 define('DB_NAME', getenv('WP_TESTS_DB_NAME') ?: 'wordpress_test');
@@ -23,4 +27,4 @@ define('WP_TESTS_TITLE', 'Course Discovery Test Suite');
 define('WP_PHP_BINARY', 'php');
 define('WPLANG', '');
 
-define('ABSPATH', '/var/www/html/');
+define('ABSPATH', getenv('WP_TESTS_ABSPATH') ?: '/var/www/html/');

@@ -2,6 +2,7 @@
 
 **A domain-modelled course search & filtering system, built as a WordPress plugin.**
 
+![CI](https://github.com/emaag/course-discovery/actions/workflows/ci.yml/badge.svg)
 ![WordPress](https://img.shields.io/badge/WordPress-7.0.2-21759B?logo=wordpress&logoColor=white)
 ![PHP](https://img.shields.io/badge/PHP-8.2%2B-777BB4?logo=php&logoColor=white)
 ![MySQL](https://img.shields.io/badge/MySQL-8.0-4479A1?logo=mysql&logoColor=white)
@@ -35,6 +36,7 @@ project documentation and a running development log.
 | Static analysis (PHPStan, level 8) | ✅ Implemented, clean (`composer stan`) |
 | Integration / feature tests (`WP_UnitTestCase`) | ✅ Implemented — 37 tests |
 | End-to-end (browser) tests | ✅ Implemented and verified — 17/17 passing |
+| CI (`.github/workflows/ci.yml`) | ✅ Implemented — quality/integration/e2e jobs on every push/PR |
 
 Full detail is in [Architectural Decisions](#architectural-decisions) and the
 [Development Log](#development-log) at the bottom of this file.
@@ -488,9 +490,10 @@ run via `composer test`. Query-*shape* assertions, not just result counts,
 are used for the filters most likely to regress silently — e.g.
 `CategoryFilterTest` asserts the exact `tax_query` array produced, not
 just which courses come back — since a wrong-but-similar SQL join can
-still return plausible-looking results. There's no CI pipeline configured
-in this repo (no `.github/workflows`) — a reasonable next step, not
-something built for this exercise.
+still return plausible-looking results. `.github/workflows/ci.yml` runs
+all three PHP-level suites on every push/PR — see Architectural
+Decisions for how it gets a real WordPress core and ACF into the
+integration/e2e jobs without either depending on a live install.
 
 **Testing new filters** — because every filter implements the same
 `Filter` contract (see Architectural Decisions below), each has its own
@@ -671,6 +674,36 @@ provide a rendering surface for the plugin during development.
   is always `WP_Post[]`, which isn't true once the
   `course_discovery_query_args` hook lets a third party set
   `fields => 'ids'`. `composer stan` runs clean.
+- **CI in three jobs, matched to what each layer actually needs — not one
+  monolithic job.** `.github/workflows/ci.yml`:
+  - `quality` — `composer test` + `composer stan`. Pure PHP, no
+    WordPress, so it's the fast gate the other two jobs wait on
+    (`needs: quality`) rather than burning minutes on integration/e2e
+    against code that's already known-broken.
+  - `integration` — real `WP_UnitTestCase` against a real WordPress core.
+    Rather than spinning up the full Docker stack just for this,
+    `wp-tests-config-integration.php`'s bootstrap only actually needs two
+    things: WordPress core class/function *files* on disk (ABSPATH), and
+    ACF's `acf.php` on disk at a predictable path — wp-phpunit installs
+    its own test database and tables itself, and this plugin's own
+    bootstrap `require`s ACF directly (see `tests/bootstrap-integration.php`)
+    rather than depending on a real "activation". So the CI job downloads
+    WordPress core + ACF as plain tarball/zip and symlinks this repo's
+    plugin directory in — no install wizard, no admin user, no running
+    site — against a `mysql:8.0` service container. `ABSPATH`/`DB_*` were
+    already read from env vars with the Docker Compose values as
+    defaults (`WP_TESTS_ABSPATH` was the one addition — previously
+    hardcoded to `/var/www/html/`), so the exact same suite runs
+    unmodified in both places.
+  - `e2e` — the one job that does need a real running, installed site
+    (to actually click through in a browser), so it's the one that runs
+    the real `docker-compose.yml` as-is — the same stack a developer
+    runs locally, not a parallel CI-only setup. WP-CLI (fetched fresh
+    into the container, not baked into the image) replaces the manual
+    "click through the install wizard" step from Setup Instructions with
+    `wp core install`/`wp plugin install --activate`/`wp theme activate`,
+    then `bin/seed.php` runs unmodified to produce the exact dataset the
+    specs assert against.
 - **Malformed start dates are prevented at entry and tolerated at read
   time — two layers, not one.** `Field\CourseFieldGroup` validates the
   `start_date` sub-field via `acf/validate_value`, rejecting anything
