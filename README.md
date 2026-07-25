@@ -34,7 +34,7 @@ project documentation and a running development log.
 | Migrations / custom DB tables | ✅ Implemented, verified live |
 | Admin dashboard (Course list table columns) | ✅ Implemented, verified via integration tests |
 | Static analysis (PHPStan, level 8) | ✅ Implemented, clean (`composer stan`) |
-| Integration / feature tests (`WP_UnitTestCase`) | ✅ Implemented — 37 tests |
+| Integration / feature tests (`WP_UnitTestCase`) | ✅ Implemented — 41 tests |
 | End-to-end (browser) tests | ✅ Implemented and verified — 19/19 passing |
 | CI (`.github/workflows/ci.yml`) | ✅ Implemented — quality/integration/e2e jobs on every push/PR |
 
@@ -416,7 +416,7 @@ Assumes the local stack is up and seeded (`bin/seed.php`) — the tests
 assert against that exact dataset (16 courses, 3 tagged "Graphic
 Design"). Point elsewhere with `COURSE_DISCOVERY_BASE_URL=https://...`.
 
-**Current coverage:** 77 unit tests — `Domain/ValueObject` (`PostId`,
+**Current coverage:** 83 unit tests — `Domain/ValueObject` (`PostId`,
 `Price`, `StartDate`, `Location`, `CategoryTerm`), `Domain/Model`'s
 `Course::locations()` derivation logic, `Filter\FilterCriteria` parsing
 and its `isEmpty()` shared-fetch signal, every concrete `Filter`'s
@@ -424,15 +424,16 @@ contribution to the query builder, the `FilterPipeline`'s end-to-end
 AND/OR composition, `Query\CourseResultAssembler`'s filter/pagination
 math, `Query\FilterOptionsProvider`'s option derivation given a
 pre-fetched Course list, `REST\CourseTransformer`'s Course→JSON
-conversion, `Migration\FilterIndexSync`'s row-computation logic, and
-`Field\CourseFieldGroup`'s start-date validation — all with no WordPress
-bootstrap, since predicates and serialisation are tested against
-fabricated `Course` objects. `composer stan` (PHPStan, level 8, against
-the WordPress/ACF Pro stubs) runs clean alongside these as a second,
-static gate — see Architectural Decisions.
+conversion, `Migration\FilterIndexSync`'s row-computation logic,
+`Field\CourseFieldGroup`'s start-date validation, and
+`Security\CoreHardening`'s REST route-matching logic — all with no
+WordPress bootstrap, since predicates and serialisation are tested
+against fabricated `Course` objects. `composer stan` (PHPStan, level 8,
+against the WordPress/ACF Pro stubs) runs clean alongside these as a
+second, static gate — see Architectural Decisions.
 
-Plus **37 integration tests** (`wp-phpunit` + `yoast/phpunit-polyfills`,
-against the plugin's own real WordPress install) across eight suites:
+Plus **41 integration tests** (`wp-phpunit` + `yoast/phpunit-polyfills`,
+against the plugin's own real WordPress install) across nine suites:
 `FilterPipelineIntegrationTest` (the brief's AND/OR composition against
 real posts/ACF data — the highest-risk area), `CourseQueryBuilderIntegrationTest`
 (search across all three text fields, real `tax_query` behaviour
@@ -451,10 +452,13 @@ options — proven with a real third-party `add_filter()` callback that
 never touches an existing class),
 `MalformedStartDateIntegrationTest` (a start date written directly to
 postmeta, bypassing ACF's own validation entirely, is skipped rather
-than crashing every page that lists courses), and
-`CourseListTableIntegrationTest` (the wp-admin Course list table's Price/
-Providers/Locations/Start Dates columns render correctly against real
-`WP_Post`/ACF data, including the numeric — not lexical — price sort).
+than crashing every page that lists courses), `CourseListTableIntegrationTest`
+(the wp-admin Course list table's Price/Providers/Locations/Start Dates
+columns render correctly against real `WP_Post`/ACF data, including the
+numeric — not lexical — price sort), and `CoreHardeningIntegrationTest`
+(an anonymous request to core's `/wp/v2/users` is rejected, a logged-in
+administrator can still use it, this plugin's own public routes are
+unaffected, and the `generator` tag is actually suppressed).
 
 ### Strategy
 
@@ -550,6 +554,7 @@ The plugin follows a namespaced, PSR-4 structure under
 | `REST`               | `CourseSearchController` (`GET /courses` — filtered, paginated search) and `FilterOptionsController` (`GET /filters` — available option lists), plus `CourseTransformer` for Course→JSON serialisation, behind a `RestController` interface filterable via `course_discovery_rest_controllers`. | ✅ Implemented |
 | `Frontend`           | `CourseArchiveTemplate` (serves the plugin's own course-listing template at the site's front page `/`, 301-redirecting the Course post type's own `/courses/` archive URL there) and `FilterFieldRenderer` (the multi-select filter disclosures — see `assets/js/combobox.js` for the Locations/Start Dates ARIA combobox enhancement layered on top). | ✅ Implemented |
 | `Admin`              | `CourseListTable` — adds Price/Providers/Locations/Start Dates columns (with a numeric price sort) to the wp-admin Courses screen, reusing `Course::fromPost()` so it can't drift from the REST API/frontend. | ✅ Implemented |
+| `Security`           | `CoreHardening` — restricts core's `GET /wp/v2/users` REST route to authenticated requests and suppresses the `generator` version-disclosure meta tag; found via a manual security audit, not part of the brief. | ✅ Implemented |
 
 ACF (Advanced Custom Fields, free edition) is installed and active as the
 one external plugin the brief allows. Its field groups are defined in code
@@ -769,6 +774,18 @@ provide a rendering surface for the plugin during development.
   exception that would take down every page that lists courses — the
   REST API, the frontend, everything. Found this gap and fixed both
   layers together; see `MalformedStartDateIntegrationTest`.
+- **Two WordPress-core hardening measures found via a manual security
+  audit of the live deployment, not part of the brief.**
+  `Security\CoreHardening` restricts core's `GET /wp/v2/users` REST
+  route to authenticated requests (it exposes every user's login
+  username with no auth required by default — real ammunition for a
+  credential-stuffing attempt against `wp-login.php`, blocked here
+  rather than removed outright since logged-in admin screens
+  legitimately depend on it) and suppresses the `generator` meta tag
+  (advertises the exact WordPress version to any anonymous visitor).
+  Neither touches this plugin's own public `course-discovery/v1/*`
+  routes — `CoreHardeningIntegrationTest` proves both the restriction
+  and that it doesn't overreach into blocking them.
 
 ## Performance & Scalability
 
@@ -1240,5 +1257,24 @@ but documented here as the intended evolution path.
   `ISRG Root X1`, so left it as originally issued rather than chase
   further — the phone issue turned out to be transient and resolved on
   its own.)
+- 2026-07-25 — Ran a manual security audit (not part of the brief) since
+  a real production deployment now existed: SQL/XSS/input-handling in
+  the plugin's own code, then the live server's real-world exposure.
+  Plugin code came back clean (parameterised queries throughout,
+  consistent output escaping, `$_GET` always
+  `wp_unslash()`+sanitised, no `eval`/`exec`/`unserialize` anywhere,
+  ABSPATH/`PHP_SAPI` guards verified live, `composer audit` clean).
+  Found two real, fixable issues on the live site, both WordPress-core
+  defaults rather than anything in this plugin: core's REST API exposes
+  every user's login username with no auth required
+  (`GET /wp/v2/users`), and the `generator` meta tag advertises the
+  exact WordPress version. Added `Security\CoreHardening` to fix both —
+  restricts the users route to authenticated requests (verified a
+  logged-in admin can still use it, and that this plugin's own public
+  routes are unaffected) and suppresses the generator tag — with a unit
+  test for the pure route-matching logic and an integration test
+  proving the actual REST/`wp_head` behaviour changed. 83 unit + 41
+  integration, all passing, verified against the real local site over
+  HTTP (not just `WP_UnitTestCase`) before considering it done.
 
 </details>
