@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace OxfordInternational\CourseDiscovery;
 
+use OxfordInternational\CourseDiscovery\Admin\CourseListTable;
 use OxfordInternational\CourseDiscovery\Field\CourseFieldGroup;
 use OxfordInternational\CourseDiscovery\Field\FieldGroupRegistrar;
 use OxfordInternational\CourseDiscovery\Field\ProviderFieldGroup;
@@ -45,6 +46,7 @@ final class Plugin
 
         (new CourseArchiveTemplate())->registerHooks();
         (new FilterIndexSync())->registerHooks();
+        (new CourseListTable())->registerHooks();
     }
 
     public function registerPostTypes(): void

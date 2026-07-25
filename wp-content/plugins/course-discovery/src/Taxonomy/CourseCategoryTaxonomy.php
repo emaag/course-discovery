@@ -31,6 +31,7 @@ final class CourseCategoryTaxonomy implements TaxonomyRegistrar
             'hierarchical' => true,
             'public' => true,
             'show_in_rest' => true,
+            'show_admin_column' => true,
             'rewrite' => ['slug' => 'course-category'],
         ]);
     }
