@@ -52,6 +52,24 @@ final class FilterCriteria
     }
 
     /**
+     * True when no filter/search value has been selected at all — the
+     * FilterPipeline contributes nothing to the query builder in this
+     * case, so a query run under these criteria matches every published
+     * Course, in default order. Callers can use this to recognise when a
+     * "current results" fetch and an "every available option" fetch would
+     * return the identical set, and safely reuse one instead of running
+     * both — see templates/archive-course.php.
+     */
+    public function isEmpty(): bool
+    {
+        return $this->search === null
+            && $this->providerIds === []
+            && $this->locationSlugs === []
+            && $this->startDates === []
+            && $this->categoryIds === [];
+    }
+
+    /**
      * Builds criteria from raw request input (e.g. REST query params).
      * Applies `course_discovery_transform_criteria` first, so a third
      * party can rewrite incoming criteria — map a legacy param name,

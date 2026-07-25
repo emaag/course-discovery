@@ -19,6 +19,7 @@ use OxfordInternational\CourseDiscovery\Filter\FilterCriteria;
 use OxfordInternational\CourseDiscovery\Filter\FilterPipeline;
 use OxfordInternational\CourseDiscovery\Frontend\FilterFieldRenderer;
 use OxfordInternational\CourseDiscovery\Query\CourseQueryBuilder;
+use OxfordInternational\CourseDiscovery\Query\CourseResultAssembler;
 use OxfordInternational\CourseDiscovery\Query\FilterOptionsProvider;
 
 if (! defined('ABSPATH')) {
@@ -34,12 +35,28 @@ $criteria = FilterCriteria::fromArray([
 ]);
 
 $page = isset($_GET['course_page']) ? max(1, (int) $_GET['course_page']) : 1;
+$perPage = 9;
 
-$builder = (new CourseQueryBuilder())->setPage($page)->setPerPage(9);
+$builder = (new CourseQueryBuilder())->setPage($page)->setPerPage($perPage);
 (new FilterPipeline())->apply($builder, $criteria);
-$result = $builder->execute();
 
-$options = (new FilterOptionsProvider())->compute();
+if ($criteria->isEmpty()) {
+    // No filter narrows the query, so "every published Course" (needed
+    // for $options, which always reflects the full set regardless of any
+    // current filter — see FilterOptionsProvider) and "Courses matching
+    // the current criteria" (needed for $result) are the same list.
+    // Fetching it once and deriving both from it, instead of running
+    // CourseQueryBuilder's WP_Query/Course-hydration twice per page view,
+    // is only valid in this specific case — as soon as any filter is
+    // selected the two lists genuinely differ (options must stay the
+    // full set; results must not), so the branch below is unchanged.
+    $allCourses = $builder->executeAll();
+    $result = (new CourseResultAssembler())->assemble($allCourses, [], $page, $perPage);
+    $options = (new FilterOptionsProvider())->compute($allCourses);
+} else {
+    $result = $builder->execute();
+    $options = (new FilterOptionsProvider())->compute();
+}
 $archiveUrl = home_url('/');
 
 get_header();

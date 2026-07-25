@@ -48,4 +48,25 @@ final class FilterCriteriaTest extends TestCase
 
         self::assertSame([], $criteria->providerIds());
     }
+
+    public function test_is_empty_is_true_when_nothing_is_selected(): void
+    {
+        self::assertTrue(FilterCriteria::fromArray([])->isEmpty());
+    }
+
+    /** @return iterable<string, array{array<string, mixed>}> */
+    public static function nonEmptyCriteriaProvider(): iterable
+    {
+        yield 'search' => [['search' => 'design']];
+        yield 'providers' => [['providers' => [5]]];
+        yield 'locations' => [['locations' => ['india']]];
+        yield 'start_dates' => [['start_dates' => ['09-2026']]];
+        yield 'categories' => [['categories' => [2]]];
+    }
+
+    /** @dataProvider nonEmptyCriteriaProvider */
+    public function test_is_empty_is_false_when_any_single_value_is_selected(array $raw): void
+    {
+        self::assertFalse(FilterCriteria::fromArray($raw)->isEmpty());
+    }
 }

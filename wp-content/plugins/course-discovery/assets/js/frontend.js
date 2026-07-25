@@ -41,10 +41,14 @@
     }
 
     function courseCardHtml(course) {
+        // Same fields, same order as templates/partials/course-card.php —
+        // keep both in sync when changing either.
         var meta =
+            metaRow('Providers', course.providers, 'name') +
             metaRow('Location', course.locations, 'name') +
             metaRow('Category', course.categories, 'name') +
-            metaRow('Start dates', course.start_dates, 'label');
+            metaRow('Start dates', course.start_dates, 'label') +
+            metaRow('Instructors', course.instructors, 'name');
 
         return (
             '<li class="course-discovery-card"><article>' +

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace OxfordInternational\CourseDiscovery\Query;
 
+use OxfordInternational\CourseDiscovery\Domain\Model\Course;
 use OxfordInternational\CourseDiscovery\Domain\ValueObject\StartDate;
 
 /**
@@ -15,10 +16,20 @@ use OxfordInternational\CourseDiscovery\Domain\ValueObject\StartDate;
  */
 final class FilterOptionsProvider
 {
-    /** @return array<string, list<array<string, mixed>>> */
-    public function compute(): array
+    /**
+     * @param list<Course>|null $courses Every published Course to derive
+     *     options from. When omitted, fetches them itself — the correct
+     *     default for a standalone call (e.g. the REST /filters
+     *     endpoint). Callers that already hold this exact list for
+     *     another reason in the same request (the archive template,
+     *     when no filter is selected — see FilterCriteria::isEmpty())
+     *     should pass it directly instead, to avoid running the same
+     *     WP_Query and Course hydration twice.
+     * @return array<string, list<array<string, mixed>>>
+     */
+    public function compute(?array $courses = null): array
     {
-        $courses = (new CourseQueryBuilder())->executeAll();
+        $courses ??= (new CourseQueryBuilder())->executeAll();
 
         $providers = [];
         $locations = [];
@@ -77,6 +88,8 @@ final class FilterOptionsProvider
          *
          * @param array<string, list<array<string, mixed>>> $options
          */
-        return apply_filters('course_discovery_filter_options', $options);
+        return function_exists('apply_filters')
+            ? apply_filters('course_discovery_filter_options', $options)
+            : $options;
     }
 }
