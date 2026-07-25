@@ -31,7 +31,9 @@ project documentation and a running development log.
 | REST endpoint (`course-discovery/v1/courses`, `/filters`) | ✅ Implemented, verified live |
 | Frontend filter UI | ✅ Implemented, verified live |
 | Migrations / custom DB tables | ✅ Implemented, verified live |
-| Integration / feature tests (`WP_UnitTestCase`) | ✅ Implemented — 20 tests |
+| Admin dashboard (Course list table columns) | ✅ Implemented, verified via integration tests |
+| Static analysis (PHPStan, level 8) | ✅ Implemented, clean (`composer stan`) |
+| Integration / feature tests (`WP_UnitTestCase`) | ✅ Implemented — 37 tests |
 | End-to-end (browser) tests | ✅ Implemented — written, partially verified (see Development Log) |
 
 Full detail is in [Architectural Decisions](#architectural-decisions) and the
@@ -318,6 +320,7 @@ Run these from `wp-content/plugins/course-discovery/`:
 ```bash
 composer install       # install plugin dependencies
 composer test          # run the PHPUnit test suite
+composer stan           # run PHPStan (level 8) against src/, using WordPress/ACF Pro stubs
 ```
 
 Docker stack commands, run from the repository root:
@@ -405,10 +408,12 @@ every concrete `Filter`'s contribution to the query builder, the
 `Migration\FilterIndexSync`'s row-computation logic, and
 `Field\CourseFieldGroup`'s start-date validation — all with no WordPress
 bootstrap, since predicates and serialisation are tested against
-fabricated `Course` objects.
+fabricated `Course` objects. `composer stan` (PHPStan, level 8, against
+the WordPress/ACF Pro stubs) runs clean alongside these as a second,
+static gate — see Architectural Decisions.
 
-Plus **32 integration tests** (`wp-phpunit` + `yoast/phpunit-polyfills`,
-against the plugin's own real WordPress install) across seven suites:
+Plus **37 integration tests** (`wp-phpunit` + `yoast/phpunit-polyfills`,
+against the plugin's own real WordPress install) across eight suites:
 `FilterPipelineIntegrationTest` (the brief's AND/OR composition against
 real posts/ACF data — the highest-risk area), `CourseQueryBuilderIntegrationTest`
 (search across all three text fields, real `tax_query` behaviour
@@ -424,10 +429,13 @@ unpublishing a real Course keeps them in sync via the real
 examples the brief names — registering a new filter, modifying query
 args, customising ordering, transforming raw criteria, altering filter
 options — proven with a real third-party `add_filter()` callback that
-never touches an existing class), and
+never touches an existing class),
 `MalformedStartDateIntegrationTest` (a start date written directly to
 postmeta, bypassing ACF's own validation entirely, is skipped rather
-than crashing every page that lists courses).
+than crashing every page that lists courses), and
+`CourseListTableIntegrationTest` (the wp-admin Course list table's Price/
+Providers/Locations/Start Dates columns render correctly against real
+`WP_Post`/ACF data, including the numeric — not lexical — price sort).
 
 ### Strategy
 
@@ -450,16 +458,22 @@ than crashing every page that lists courses).
   filters, pagination and response shape. Admin-screen capability checks
   are not yet covered.
 - **End-to-end tests** (implemented) —
-  `wp-content/plugins/course-discovery/tests/e2e/` (Playwright): 13 tests
+  `wp-content/plugins/course-discovery/tests/e2e/` (Playwright): 17 tests
   across `keyboard-operability.spec.js` (every interaction via
-  `page.keyboard`, never a mouse), `combobox-filters.spec.js` (the native
-  `<details>`/`<summary>` disclosure opens/closes correctly, options are
-  chronologically ordered, selection shows a count badge), and
+  `page.keyboard`, never a mouse, against the plain `<details>`/
+  `<summary>` Categories filter — see Architectural Decisions),
+  `combobox-filters.spec.js` (the JS-enhanced Locations/Start Dates
+  `role="combobox"`/`role="listbox"` widget: correct ARIA wiring,
+  `aria-expanded`/`aria-activedescendant` tracking, arrow-key/Space/
+  Escape keyboard behaviour, chronological start-date ordering, and that
+  the hidden native checkbox — not just the visible widget — actually
+  carries the selection into a form submission), and
   `filter-narrows-results.spec.js` (a category filter narrows to the
-  right courses, combining two filters is AND not OR, Reset restores the
-  full set). Run via `npm test:e2e` from that directory against a
-  running instance (`COURSE_DISCOVERY_BASE_URL` to point at something
-  other than `localhost:8080`).
+  right courses, combining a checkbox-based Categories filter with a
+  combobox-based Locations filter is AND not OR, Reset restores the full
+  set). Run via `npm test:e2e` from that directory against a running
+  instance (`COURSE_DISCOVERY_BASE_URL` to point at something other than
+  `localhost:8080`).
 
 **High-risk areas** — the filter AND/OR composition logic; start date
 parsing/formatting and chronological ordering of the `{month}-{year}`
@@ -510,7 +524,8 @@ The plugin follows a namespaced, PSR-4 structure under
 | `Filter`             | `FilterCriteria` plus one class per filter (search, provider, location, start date, category), each implementing a shared `Filter` interface, composed by `FilterPipeline`. | ✅ Implemented |
 | `Migration`          | `MigrationRunner` (tracks applied migrations via an option) running `CreateFilterIndexTables` (two lookup tables — see Design Decisions), kept in sync by `FilterIndexSync` on save/delete. | ✅ Implemented |
 | `REST`               | `CourseSearchController` (`GET /courses` — filtered, paginated search) and `FilterOptionsController` (`GET /filters` — available option lists), plus `CourseTransformer` for Course→JSON serialisation, behind a `RestController` interface filterable via `course_discovery_rest_controllers`. | ✅ Implemented |
-| `Frontend`           | `CourseArchiveTemplate` (serves the plugin's own course-listing template at the site's front page `/`, 301-redirecting the Course post type's own `/courses/` archive URL there) and `FilterFieldRenderer` (the multi-select filter disclosures). | ✅ Implemented |
+| `Frontend`           | `CourseArchiveTemplate` (serves the plugin's own course-listing template at the site's front page `/`, 301-redirecting the Course post type's own `/courses/` archive URL there) and `FilterFieldRenderer` (the multi-select filter disclosures — see `assets/js/combobox.js` for the Locations/Start Dates ARIA combobox enhancement layered on top). | ✅ Implemented |
+| `Admin`              | `CourseListTable` — adds Price/Providers/Locations/Start Dates columns (with a numeric price sort) to the wp-admin Courses screen, reusing `Course::fromPost()` so it can't drift from the REST API/frontend. | ✅ Implemented |
 
 ACF (Advanced Custom Fields, free edition) is installed and active as the
 one external plugin the brief allows. Its field groups are defined in code
@@ -614,15 +629,48 @@ provide a rendering surface for the plugin during development.
   with a `fetch` against `course-discovery/v1/courses` and an in-place
   DOM update; it never introduces filtering logic that doesn't already
   exist server-side, so the two can't drift out of sync with each other.
-- **Multi-select "combobox" as a native `<details>`/`<summary>`
-  disclosure, not a hand-built ARIA `role="combobox"` widget.** The
-  brief requires Locations and Start Dates to be a dropdown combobox;
-  `FilterFieldRenderer` implements all four multi-selects (Providers,
-  Locations, Categories, Start Dates) this way for consistency. A native
-  disclosure widget gets correct open/close keyboard behaviour from the
-  browser for free and works with JavaScript entirely disabled, which a
-  custom combobox's hand-rolled keyboard handling can't guarantee — see
-  the class's own docblock, and Assumptions Made below.
+- **Multi-select combobox: a working native `<details>`/`<summary>`
+  disclosure as the base, upgraded to a real `role="combobox"`/
+  `role="listbox"` widget by JS for exactly the two filters the brief
+  requires it for.** `FilterFieldRenderer` renders all four multi-selects
+  (Providers, Locations, Categories, Start Dates) as the same `<details>`/
+  checkbox disclosure — closed by default, correct open/close keyboard
+  behaviour from the browser for free, works with JavaScript entirely
+  disabled. For Locations and Start Dates specifically (the two the brief
+  names as needing a "dropdown combobox"), `assets/js/combobox.js`
+  progressively enhances that markup into an ARIA 1.2 combobox: the
+  `<summary>` becomes the `role="combobox"` trigger, a generated
+  `role="listbox"` replaces the visible checkbox rows, and keyboard
+  support (arrow keys, Home/End, typeahead, Space to toggle the active
+  option without closing — multi-select shouldn't close on select, Escape
+  to close and return focus to the trigger) is implemented against
+  `aria-activedescendant` rather than moving real DOM focus into the
+  list, which is the more robust of the two focus-management models the
+  ARIA combobox pattern documents. Providers and Categories are left as
+  the plain disclosure, since the brief only requires "selection of
+  multiple values" for those two, not a combobox.
+  The original checkboxes are never removed, only hidden (`hidden`, not
+  `display:none` via a class, though the effect is the same) — a hidden
+  form control is still a submitted one, so this JS layer only changes
+  what's *seen and interacted with*, never what's actually sent. The page
+  degrades to the plain checkbox disclosure — semantically correct,
+  keyboard-operable, and satisfying "selection of multiple values" on its
+  own — with JavaScript disabled or failed to load. See the class's own
+  docblock, `assets/js/combobox.js`'s docblock, and Assumptions Made
+  below.
+- **PHPStan (level 8) as a second, static gate alongside the test suite.**
+  `phpstan.neon.dist` runs against `src/` using `wordpress-stubs` and
+  `acf-pro-stubs` (via `szepeviktor/phpstan-wordpress`), so type errors
+  involving WordPress/ACF's own loosely-typed APIs (`get_field()`
+  returning `mixed`, `WP_Query::$posts` being `WP_Post[]|int[]`
+  depending on the `fields` arg) are caught, not just this plugin's own
+  code. It's a genuinely useful complement to the test suite rather than
+  a checkbox: it directly caught two real gaps — an `array_map()` over an
+  associative array silently losing its `list<>` shape without
+  `array_values()`, and `CourseQueryBuilder` assuming `WP_Query::$posts`
+  is always `WP_Post[]`, which isn't true once the
+  `course_discovery_query_args` hook lets a third party set
+  `fields => 'ids'`. `composer stan` runs clean.
 - **Malformed start dates are prevented at entry and tolerated at read
   time — two layers, not one.** `Field\CourseFieldGroup` validates the
   `start_date` sub-field via `acf/validate_value`, rejecting anything
@@ -701,15 +749,20 @@ but documented here as the intended evolution path.
   versions is assumed.
 - Domain logic lives in the plugin, not the theme; the theme is a thin
   presentation layer.
-- "Dropdown combobox" (for Locations/Start Dates) is interpreted as a
-  closed-by-default control that expands into a list of options on
-  click or keyboard activation — not specifically the WAI-ARIA
-  `role="combobox"` pattern (a text input with inline autocomplete).
-  Implemented as a native `<details>`/`<summary>` disclosure instead;
-  see the Design Decisions note above for why. If a stricter ARIA
-  combobox (with typeahead filtering) is expected instead, that would
-  be a follow-up to `FilterFieldRenderer`, not a change to the
-  underlying Filter/Query layer.
+- "Dropdown combobox" (for Locations/Start Dates) is implemented as a
+  `role="combobox"` trigger with a `role="listbox"` popup — not the
+  WAI-ARIA "editable combobox with autocomplete" variant (a text input
+  you type into to filter options), since neither field's option list is
+  large enough to need text filtering; this is the "select-only"
+  combobox shape, extended to multi-select. It's a JS-enhanced upgrade of
+  a working `<details>`/checkbox disclosure rather than a hand-built
+  widget from scratch — see the Design Decisions note above for why that
+  split (base markup that already works, JS enhances rather than
+  replaces) was chosen over building the widget as the only markup.
+  Typeahead-by-typing is implemented as a bonus (jumps to the next
+  option starting with the typed character), even though the brief
+  doesn't ask for it, since it falls out of the same keyboard handling
+  needed for arrow-key navigation.
 - Visual styling (`assets/css/frontend.css`) follows an explicit
   direction: light/white background, one accent colour (Oxford blue
   `#002147`), system fonts only (no external font/CDN dependency, so the
@@ -965,5 +1018,41 @@ but documented here as the intended evolution path.
   requirements — the e2e suite is written and partially verified; a full
   clean run needs a normally-provisioned environment outside this
   sandboxed session (see above).
+- 2026-07-25 — Committed prior session's uncommitted work-in-progress as
+  two separate, logically-scoped commits (it had been left staged across
+  a session boundary): PHPStan (level 8, WordPress/ACF Pro stubs) plus
+  the two real type gaps it caught, and the `Admin\CourseListTable`
+  wp-admin columns feature with its integration test. `composer test`
+  (69/69) and `composer stan` (clean) both re-verified before committing.
+  Production HTTPS (`courses.statichex.dev`) was already fixed and
+  documented as of 2026-07-25 — see Production Deployment above; nothing
+  further needed there this session.
+- 2026-07-25 — Reworked the Locations/Start Dates filters from a plain
+  `<details>` disclosure into a real ARIA combobox: added
+  `assets/js/combobox.js`, which progressively enhances
+  `FilterFieldRenderer`'s existing markup into a `role="combobox"`/
+  `role="listbox"` widget (arrow keys, Home/End, typeahead, Space to
+  toggle without closing, Escape to close and refocus) using
+  `aria-activedescendant` rather than moving real focus into the list —
+  see Architectural Decisions and Assumptions Made above for the design
+  and why Providers/Categories were deliberately left as the plain
+  disclosure. The original checkboxes are hidden, not removed, so the
+  same `name[]` values still submit correctly with this script disabled.
+  Rewrote `combobox-filters.spec.js` against the new ARIA contract
+  (`aria-expanded`, `aria-activedescendant`, `role="option"`, and an
+  explicit assertion that the hidden checkbox — not just the visible
+  widget — carries the selection), and updated the two other e2e specs
+  that interacted with Locations' old checkbox markup directly
+  (`filter-narrows-results.spec.js`) or asserted on it as the
+  keyboard-operability baseline (`keyboard-operability.spec.js`, moved
+  to target Providers instead, since that filter is intentionally
+  unchanged). `composer test` (69/69) and `composer stan` (clean) both
+  re-verified. **Not run this session**: same Docker/Playwright
+  limitation as the original e2e suite (see above) — this sandboxed
+  session has no `docker` binary available at all this time (WSL
+  integration not active), so neither a live browser check nor an
+  actual Playwright run against a running instance was possible; the
+  new/changed specs need a real run before being trusted, same as the
+  rest of the e2e suite.
 
 </details>
