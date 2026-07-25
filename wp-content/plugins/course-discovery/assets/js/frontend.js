@@ -84,8 +84,24 @@
         return params;
     }
 
+    function coursesUrl(params) {
+        // restUrl already carries a query string under a "Plain" permalink
+        // structure (e.g. ".../index.php?rest_route=/course-discovery/v1/"),
+        // not just a path — blindly appending "courses?" + params would add
+        // a second "?", which browsers treat as a literal character inside
+        // the existing query value rather than a new query string, silently
+        // 404ing every filtered request. Building a URL and merging search
+        // params onto it (instead of string-concatenating a raw "?") is
+        // correct whether restUrl has its own query string or not.
+        var url = new URL(restUrl + 'courses', window.location.href);
+        params.forEach(function (value, key) {
+            url.searchParams.append(key, value);
+        });
+        return url.toString();
+    }
+
     function fetchAndRender(params) {
-        fetch(restUrl + 'courses?' + params.toString())
+        fetch(coursesUrl(params))
             .then(function (response) {
                 return response.json();
             })
