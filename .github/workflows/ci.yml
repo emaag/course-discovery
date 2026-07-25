@@ -99,6 +99,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+          coverage: none
+
+      - uses: ramsey/composer-install@v3
+        with:
+          working-directory: wp-content/plugins/course-discovery
+
       - name: Start the stack
         run: docker compose up -d
 
