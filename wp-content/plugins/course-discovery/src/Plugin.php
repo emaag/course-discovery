@@ -20,6 +20,7 @@ use OxfordInternational\CourseDiscovery\PostType\ProviderPostType;
 use OxfordInternational\CourseDiscovery\REST\CourseSearchController;
 use OxfordInternational\CourseDiscovery\REST\FilterOptionsController;
 use OxfordInternational\CourseDiscovery\REST\RestController;
+use OxfordInternational\CourseDiscovery\Security\CoreHardening;
 use OxfordInternational\CourseDiscovery\Taxonomy\CourseCategoryTaxonomy;
 use OxfordInternational\CourseDiscovery\Taxonomy\TaxonomyRegistrar;
 
@@ -47,6 +48,7 @@ final class Plugin
         (new CourseArchiveTemplate())->registerHooks();
         (new FilterIndexSync())->registerHooks();
         (new CourseListTable())->registerHooks();
+        (new CoreHardening())->registerHooks();
     }
 
     public function registerPostTypes(): void
