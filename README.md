@@ -491,9 +491,10 @@ are used for the filters most likely to regress silently — e.g.
 `CategoryFilterTest` asserts the exact `tax_query` array produced, not
 just which courses come back — since a wrong-but-similar SQL join can
 still return plausible-looking results. `.github/workflows/ci.yml` runs
-all three PHP-level suites on every push/PR — see Architectural
-Decisions for how it gets a real WordPress core and ACF into the
-integration/e2e jobs without either depending on a live install.
+unit + PHPStan, the integration suite, and the full Playwright suite in
+three separate jobs on every push/PR — see Architectural Decisions for
+how it gets a real WordPress core and ACF into the integration/e2e jobs
+without either depending on a live install.
 
 **Testing new filters** — because every filter implements the same
 `Filter` contract (see Architectural Decisions below), each has its own
@@ -1110,5 +1111,35 @@ but documented here as the intended evolution path.
   37 integration (`wordpress_test` DB created fresh) + PHPStan, all
   clean. Nothing outstanding from the brief's testing requirements
   remains unverified.
+- 2026-07-25 — Added `.github/workflows/ci.yml` (see Architectural
+  Decisions for the job design) and pushed it three times, watching each
+  real run with `gh run watch` rather than trusting the YAML on
+  inspection — the same standard applied to the local test suite
+  earlier. Found and fixed two real bugs this way, neither of which was
+  a CI-authoring mistake:
+  1. `bin/seed.php` hard-requires the plugin's own `vendor/autoload.php`
+     (unlike the main plugin bootstrap, which checks `file_exists()`
+     first and degrades quietly) — the `e2e` job wasn't running
+     `composer install` before starting the stack, so the bind-mounted
+     `vendor/` didn't exist and seeding fatal-errored.
+  2. A genuine, previously-undiscovered production bug in
+     `assets/js/frontend.js`: `fetchAndRender()` built its request URL
+     as `restUrl + 'courses?' + params`, correct only when `rest_url()`
+     returns a bare path (pretty permalinks). Under WordPress's default
+     "Plain" permalink structure — what a fresh install starts on, and
+     what every environment this suite had run against before today
+     already had changed away from — `rest_url()` returns a URL that
+     already carries `?rest_route=...`, so the extra `courses?` produced
+     a second `?` and every filtered/paginated request 404'd
+     (`rest_no_route`), silently, since the fetch chain had no
+     `.catch()`. Reproduced it directly (confirmed via `curl` that the
+     exact malformed URL the old code built really did 404) against a
+     second, disposable Docker Compose stack (`-p cd-ci-repro`, remapped
+     ports, provisioned via WP-CLI exactly like the CI job — chosen over
+     guessing through further CI round-trips) before fixing it with a
+     proper `URL`/`URLSearchParams`-based merge and confirming all 17
+     e2e tests pass against that same fresh, Plain-permalink instance.
+  All three jobs (`quality`, `integration`, `e2e`) are green on a real
+  run as of this entry, not just "should work."
 
 </details>
