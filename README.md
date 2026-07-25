@@ -306,7 +306,7 @@ containers (development only — never do this for real secrets), so they can
 be read directly from Docker instead of trusting this table stays in sync
 with `docker-compose.yml`:
 
-```bash
+```console
 docker compose exec wordpress printenv | grep WORDPRESS_DB_   # DB host/user/password/name, as WordPress sees them
 docker compose exec db printenv | grep MYSQL_                # MySQL root/user/password/database, as the db container sees them
 ```
@@ -325,7 +325,7 @@ once per fresh volume — if `db_data` already exists, remove it first
 
 To import into a database that's already running, instead run:
 
-```bash
+```console
 docker compose exec -T db mysql -uwordpress -pwordpress wordpress < db/dump.sql
 ```
 
@@ -335,15 +335,15 @@ Dump files in `db/` are gitignored and stay local.
 
 Run these from `wp-content/plugins/course-discovery/`:
 
-```bash
-composer install       # install plugin dependencies
-composer test          # run the PHPUnit test suite
-composer stan           # run PHPStan (level 8) against src/, using WordPress/ACF Pro stubs
+```console
+composer install    # install plugin dependencies
+composer test       # run the PHPUnit test suite
+composer stan       # run PHPStan (level 8) against src/, using WordPress/ACF Pro stubs
 ```
 
 Docker stack commands, run from the repository root:
 
-```bash
+```console
 docker compose up -d       # start WordPress, MySQL, phpMyAdmin
 docker compose down        # stop the stack
 docker compose logs -f     # tail logs
@@ -352,7 +352,7 @@ docker compose logs -f     # tail logs
 Seeding dummy data (run from the repository root, needs the WordPress/ACF
 runtime, so it's run inside the container rather than via composer):
 
-```bash
+```console
 docker compose exec wordpress php wp-content/plugins/course-discovery/bin/seed.php
 ```
 
@@ -379,7 +379,7 @@ Three separate suites, because each needs a different environment.
 
 **Unit tests** — pure PHP, no WordPress, run from the host:
 
-```bash
+```console
 composer test
 ```
 
@@ -387,7 +387,7 @@ composer test
 real `WP_Query`/ACF/REST dispatch), so they run inside the container
 against a dedicated test database:
 
-```bash
+```console
 docker compose exec wordpress php wp-content/plugins/course-discovery/vendor/bin/phpunit \
   -c wp-content/plugins/course-discovery/phpunit-integration.xml.dist
 ```
@@ -397,7 +397,7 @@ run from inside the container for the same ABSPATH/DB-host reasons.) The
 test database (`wordpress_test` on the same `db` service, separate from
 the dev `wordpress` database) needs creating once:
 
-```bash
+```console
 docker compose exec -T db mysql -uroot -proot -e \
   "CREATE DATABASE IF NOT EXISTS wordpress_test; GRANT ALL PRIVILEGES ON wordpress_test.* TO 'wordpress'@'%';"
 ```
@@ -405,7 +405,7 @@ docker compose exec -T db mysql -uroot -proot -e \
 **End-to-end tests** — a real browser (Playwright) against a running
 instance of the site, so they run from the host, outside Docker:
 
-```bash
+```console
 cd wp-content/plugins/course-discovery/tests/e2e
 npm install
 npx playwright install chromium  # first time only
@@ -567,6 +567,39 @@ provide a rendering surface for the plugin during development.
 
 ### Design decisions
 
+Grouped by concern, rather than one flat list — jump to whichever you care about.
+
+#### Domain modelling
+
+- **Value objects over primitives.** e.g. price is a `Price` value object
+  (not a bare float) so currency/formatting/future range support has one
+  home; start dates are a `StartDate` value object that knows how to
+  format/compare/sort chronologically, rather than passing month/year
+  strings around and re-parsing them wherever ordering is needed.
+- **Locations as derived, not stored.** Since Location is derived from
+  Provider, it's computed/read from the Provider relationship rather than
+  duplicated as its own Course meta field, avoiding a second source of
+  truth that could drift.
+- **ACF for field storage, domain layer for meaning.** ACF is used purely
+  as the admin data-entry/storage mechanism (the only allowed external
+  plugin); all business logic and typed access goes through the
+  `Domain/Model` and `Domain/ValueObject` layer so the rest of the codebase
+  never touches `get_field()` calls directly.
+- **Malformed start dates are prevented at entry and tolerated at read
+  time — two layers, not one.** `Field\CourseFieldGroup` validates the
+  `start_date` sub-field via `acf/validate_value`, rejecting anything
+  that doesn't parse as `StartDate` before it ever reaches the database.
+  But `acf/validate_value` only runs for the real wp-admin form — ACF's
+  own `update_field()` API, a row written before validation existed, or
+  a future import script all bypass it entirely. So
+  `Course::hydrateStartDates()` also catches a malformed value and skips
+  it (logging why) rather than letting one bad row throw an uncaught
+  exception that would take down every page that lists courses — the
+  REST API, the frontend, everything. Found this gap and fixed both
+  layers together; see `MalformedStartDateIntegrationTest`.
+
+#### Filtering & querying
+
 - **Composition over inheritance.** Filters are separate, independently
   testable classes composed by `FilterPipeline` rather than built as
   subclasses of a base "filter" class. Each filter only needs to know how
@@ -595,6 +628,46 @@ provide a rendering surface for the plugin during development.
   ambiguity entirely, at the cost of fetching the full candidate set
   before pagination (see `CourseQueryBuilder`'s docblock, and Performance &
   Scalability for the evolution path).
+- **`WP_Query` abstraction.** Domain code never builds raw `WP_Query` arg
+  arrays inline; a query builder translates typed filter criteria into
+  `WP_Query`/`WP_Meta_Query`/`WP_Tax_Query` arguments in one place, which is
+  also what integration tests assert against.
+- **The archive template shares one course fetch instead of running two,
+  in the specific case where that's actually valid.** Options must
+  always reflect *every* published Course regardless of the current
+  selection, while results must reflect only Courses matching it —
+  genuinely different queries whenever any filter is active, so nothing
+  here changes in that case. But when `FilterCriteria::isEmpty()` (no
+  filter/search selected at all — the common first-page-view case), both
+  queries are the *same* query: every published Course, in default order.
+  `templates/archive-course.php` detects that case and fetches/hydrates
+  once via `CourseQueryBuilder::executeAll()`, deriving both `$result`
+  (through `CourseResultAssembler::assemble()` directly, no predicates to
+  apply) and `$options` (`FilterOptionsProvider::compute()` now takes an
+  optional pre-fetched `list<Course>`, only running its own query when
+  one isn't given — unaffected for the REST `/filters` endpoint's own
+  standalone calls) from the one result, instead of two independent
+  `WP_Query` + full-Course-hydration passes on every unfiltered page
+  view.
+- **Two focused lookup tables, not one wide cross-product table.**
+  `CreateFilterIndexTables` creates `course_discovery_course_providers`
+  (course_id, provider_id, location_slug) and
+  `course_discovery_course_start_dates` (course_id, start_date) — kept
+  live by `FilterIndexSync` on every Course save/delete. A course with 2
+  providers and 3 start dates needs 5 rows split across two single-
+  purpose tables rather than 6 in one table crossing every dimension
+  together, and each table stays independently indexable. Categories
+  aren't duplicated here — `course_category` is a real taxonomy already
+  backed by an indexed join (`wp_term_relationships`). **Not yet wired
+  into `CourseQueryBuilder`**: the existing in-PHP-predicate filters are
+  simpler, already thoroughly tested, and correct at this project's
+  scale — these tables exist and stay accurate as the documented
+  Performance & Scalability evolution path, ready to become the query
+  source without a risky "build the index and cut over in the same
+  change" step.
+
+#### Extensibility
+
 - **Hook/event pipeline for extensibility.** Filters register themselves
   via `course_discovery_filters`; `CourseQueryBuilder` fires
   `course_discovery_query_args` (modify `WP_Query` args before execution)
@@ -615,72 +688,9 @@ provide a rendering surface for the plugin during development.
   Course rather than listing all Providers/Categories that exist — so an
   option that wouldn't return anything (e.g. a Provider with no Course
   assigned yet) never appears as a selectable filter value.
-- **The archive template shares one course fetch instead of running two,
-  in the specific case where that's actually valid.** Options must
-  always reflect *every* published Course regardless of the current
-  selection (the point above), while results must reflect only Courses
-  matching it — genuinely different queries whenever any filter is
-  active, so nothing here changes in that case. But when
-  `FilterCriteria::isEmpty()` (no filter/search selected at all — the
-  common first-page-view case), both queries are the *same* query: every
-  published Course, in default order. `templates/archive-course.php`
-  detects that case and fetches/hydrates once via
-  `CourseQueryBuilder::executeAll()`, deriving both `$result` (through
-  `CourseResultAssembler::assemble()` directly, no predicates to apply)
-  and `$options` (`FilterOptionsProvider::compute()` now takes an
-  optional pre-fetched `list<Course>`, only running its own query when
-  one isn't given — unaffected for the REST `/filters` endpoint's own
-  standalone calls) from the one result, instead of two independent
-  `WP_Query` + full-Course-hydration passes on every unfiltered page
-  view.
-- **Course cards: one field list, two renderers that can't be merged
-  into one — so a test enforces they can't drift instead.**
-  `templates/partials/course-card.php` (server-rendered) and
-  `assets/js/frontend.js`'s `courseCardHtml()` (client-rendered after a
-  JS-driven filter/paginate — see the progressive-enhancement note
-  below) render the same fields in the same order, but can't literally
-  share one template across the PHP/JS boundary the way, say,
-  `FilterOptionsProvider` is shared between REST and the template.
-  `tests/e2e/specs/card-rendering-parity.spec.js` asserts both paths
-  render the same field set in the same canonical order, so a field
-  (e.g. Providers/Instructors, both added here — they're already in
-  `CourseTransformer`'s REST payload and the domain model, just weren't
-  previously surfaced on the card) added to only one renderer fails a
-  real test instead of silently drifting.
-- **Two focused lookup tables, not one wide cross-product table.**
-  `CreateFilterIndexTables` creates `course_discovery_course_providers`
-  (course_id, provider_id, location_slug) and
-  `course_discovery_course_start_dates` (course_id, start_date) — kept
-  live by `FilterIndexSync` on every Course save/delete. A course with 2
-  providers and 3 start dates needs 5 rows split across two single-
-  purpose tables rather than 6 in one table crossing every dimension
-  together, and each table stays independently indexable. Categories
-  aren't duplicated here — `course_category` is a real taxonomy already
-  backed by an indexed join (`wp_term_relationships`). **Not yet wired
-  into `CourseQueryBuilder`**: the existing in-PHP-predicate filters are
-  simpler, already thoroughly tested, and correct at this project's
-  scale — these tables exist and stay accurate as the documented
-  Performance & Scalability evolution path, ready to become the query
-  source without a risky "build the index and cut over in the same
-  change" step.
-- **`WP_Query` abstraction.** Domain code never builds raw `WP_Query` arg
-  arrays inline; a query builder translates typed filter criteria into
-  `WP_Query`/`WP_Meta_Query`/`WP_Tax_Query` arguments in one place, which is
-  also what integration tests assert against.
-- **Value objects over primitives.** e.g. price is a `Price` value object
-  (not a bare float) so currency/formatting/future range support has one
-  home; start dates are a `StartDate` value object that knows how to
-  format/compare/sort chronologically, rather than passing month/year
-  strings around and re-parsing them wherever ordering is needed.
-- **Locations as derived, not stored.** Since Location is derived from
-  Provider, it's computed/read from the Provider relationship rather than
-  duplicated as its own Course meta field, avoiding a second source of
-  truth that could drift.
-- **ACF for field storage, domain layer for meaning.** ACF is used purely
-  as the admin data-entry/storage mechanism (the only allowed external
-  plugin); all business logic and typed access goes through the
-  `Domain/Model` and `Domain/ValueObject` layer so the rest of the codebase
-  never touches `get_field()` calls directly.
+
+#### Frontend
+
 - **Frontend as progressive enhancement, not a JS-only app.**
   `templates/archive-course.php` reads filter selections straight from
   `$_GET` and renders through the exact same `FilterCriteria`/
@@ -719,6 +729,22 @@ provide a rendering surface for the plugin during development.
   own — with JavaScript disabled or failed to load. See the class's own
   docblock, `assets/js/combobox.js`'s docblock, and Assumptions Made
   below.
+- **Course cards: one field list, two renderers that can't be merged
+  into one — so a test enforces they can't drift instead.**
+  `templates/partials/course-card.php` (server-rendered) and
+  `assets/js/frontend.js`'s `courseCardHtml()` (client-rendered after a
+  JS-driven filter/paginate) render the same fields in the same order,
+  but can't literally share one template across the PHP/JS boundary the
+  way, say, `FilterOptionsProvider` is shared between REST and the
+  template. `tests/e2e/specs/card-rendering-parity.spec.js` asserts both
+  paths render the same field set in the same canonical order, so a
+  field (e.g. Providers/Instructors, both added here — they're already in
+  `CourseTransformer`'s REST payload and the domain model, just weren't
+  previously surfaced on the card) added to only one renderer fails a
+  real test instead of silently drifting.
+
+#### Testing & tooling
+
 - **PHPStan (level 8) as a second, static gate alongside the test suite.**
   `phpstan.neon.dist` runs against `src/` using `wordpress-stubs` and
   `acf-pro-stubs` (via `szepeviktor/phpstan-wordpress`), so type errors
@@ -762,18 +788,9 @@ provide a rendering surface for the plugin during development.
     `wp core install`/`wp plugin install --activate`/`wp theme activate`,
     then `bin/seed.php` runs unmodified to produce the exact dataset the
     specs assert against.
-- **Malformed start dates are prevented at entry and tolerated at read
-  time — two layers, not one.** `Field\CourseFieldGroup` validates the
-  `start_date` sub-field via `acf/validate_value`, rejecting anything
-  that doesn't parse as `StartDate` before it ever reaches the database.
-  But `acf/validate_value` only runs for the real wp-admin form — ACF's
-  own `update_field()` API, a row written before validation existed, or
-  a future import script all bypass it entirely. So
-  `Course::hydrateStartDates()` also catches a malformed value and skips
-  it (logging why) rather than letting one bad row throw an uncaught
-  exception that would take down every page that lists courses — the
-  REST API, the frontend, everything. Found this gap and fixed both
-  layers together; see `MalformedStartDateIntegrationTest`.
+
+#### Security
+
 - **Two WordPress-core hardening measures found via a manual security
   audit of the live deployment, not part of the brief.**
   `Security\CoreHardening` restricts core's `GET /wp/v2/users` REST
@@ -871,6 +888,18 @@ but documented here as the intended evolution path.
   `#002147`), system fonts only (no external font/CDN dependency, so the
   page renders identically offline) — a professional "university
   website" look rather than a developer-tool aesthetic.
+- All course prices are assumed to be a single currency (GBP). There's no
+  per-course or per-provider currency field anywhere in the data model —
+  `Price` (see Domain modelling under Design Decisions) already carries a
+  `currency` property/getter and formats accordingly, but nothing ever
+  passes a value other than its constructor default, so every course is
+  implicitly GBP today. Real multi-currency support (most naturally a
+  currency field on Provider, since that's usually where it actually
+  varies) would mean adding that ACF field and passing it through
+  `Course::fromPost()`, not changing `Price` itself. This is a different
+  axis from the brief's own price note ("designed to be extended to a
+  range or multiple price points") — that's one course, several prices;
+  this is one price, which currency.
 
 ## Development Log
 

@@ -26,3 +26,6 @@ db/*.sql.gz
 Thumbs.db
 .idea/
 .vscode/
+
+# Local-only working copy of the README (condensed dev log) — never pushed
+README.local.md
