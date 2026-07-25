@@ -202,7 +202,7 @@ final class Course
             return [];
         }
 
-        return array_map(
+        return array_values(array_map(
             static fn (WP_Term $term): CategoryTerm => new CategoryTerm(
                 (int) $term->term_id,
                 $term->name,
@@ -210,7 +210,7 @@ final class Course
                 $term->parent > 0 ? (int) $term->parent : null,
             ),
             $terms,
-        );
+        ));
     }
 
     /** @return list<WP_Post> */

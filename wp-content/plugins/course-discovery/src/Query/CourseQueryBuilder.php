@@ -139,15 +139,23 @@ final class CourseQueryBuilder
          * meta_query clause for a new, SQL-native filter.
          *
          * @param array<string, mixed> $args
+         * @param self $builder
          */
         $args = apply_filters('course_discovery_query_args', $args, $this);
 
         $query = new WP_Query($args);
 
-        $courses = array_map(
-            static fn (WP_Post $post): Course => Course::fromPost($post),
-            $query->posts,
-        );
+        // $query->posts is typed WP_Post[]|int[] because 'fields' is part of
+        // $args, which the course_discovery_query_args filter above can
+        // freely rewrite — a third party setting fields=>'ids' must not
+        // fatal here, so non-WP_Post entries are skipped defensively.
+        $courses = [];
+
+        foreach ($query->posts as $post) {
+            if ($post instanceof WP_Post) {
+                $courses[] = Course::fromPost($post);
+            }
+        }
 
         /**
          * Customise result ordering. Runs on the already-hydrated Course

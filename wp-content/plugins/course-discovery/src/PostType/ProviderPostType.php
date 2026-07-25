@@ -6,6 +6,7 @@ namespace OxfordInternational\CourseDiscovery\PostType;
 
 final class ProviderPostType implements PostTypeRegistrar
 {
+    /** @phpstan-return non-empty-lowercase-string */
     public function slug(): string
     {
         return 'provider';

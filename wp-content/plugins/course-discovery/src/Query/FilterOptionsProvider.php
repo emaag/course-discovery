@@ -66,7 +66,7 @@ final class FilterOptionsProvider
                     'value' => $date->toStorageString(),
                     'label' => $date->format('F Y'),
                 ],
-                array_values($startDates),
+                $startDates,
             ),
         ];
 
