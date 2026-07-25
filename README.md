@@ -35,7 +35,7 @@ project documentation and a running development log.
 | Admin dashboard (Course list table columns) | ✅ Implemented, verified via integration tests |
 | Static analysis (PHPStan, level 8) | ✅ Implemented, clean (`composer stan`) |
 | Integration / feature tests (`WP_UnitTestCase`) | ✅ Implemented — 37 tests |
-| End-to-end (browser) tests | ✅ Implemented and verified — 17/17 passing |
+| End-to-end (browser) tests | ✅ Implemented and verified — 19/19 passing |
 | CI (`.github/workflows/ci.yml`) | ✅ Implemented — quality/integration/e2e jobs on every push/PR |
 
 Full detail is in [Architectural Decisions](#architectural-decisions) and the
@@ -400,14 +400,15 @@ Assumes the local stack is up and seeded (`bin/seed.php`) — the tests
 assert against that exact dataset (16 courses, 3 tagged "Graphic
 Design"). Point elsewhere with `COURSE_DISCOVERY_BASE_URL=https://...`.
 
-**Current coverage:** 69 unit tests — `Domain/ValueObject` (`PostId`,
+**Current coverage:** 77 unit tests — `Domain/ValueObject` (`PostId`,
 `Price`, `StartDate`, `Location`, `CategoryTerm`), `Domain/Model`'s
-`Course::locations()` derivation logic, `Filter\FilterCriteria` parsing,
-every concrete `Filter`'s contribution to the query builder, the
-`FilterPipeline`'s end-to-end AND/OR composition,
-`Query\CourseResultAssembler`'s filter/pagination math,
-`REST\CourseTransformer`'s Course→JSON conversion,
-`Migration\FilterIndexSync`'s row-computation logic, and
+`Course::locations()` derivation logic, `Filter\FilterCriteria` parsing
+and its `isEmpty()` shared-fetch signal, every concrete `Filter`'s
+contribution to the query builder, the `FilterPipeline`'s end-to-end
+AND/OR composition, `Query\CourseResultAssembler`'s filter/pagination
+math, `Query\FilterOptionsProvider`'s option derivation given a
+pre-fetched Course list, `REST\CourseTransformer`'s Course→JSON
+conversion, `Migration\FilterIndexSync`'s row-computation logic, and
 `Field\CourseFieldGroup`'s start-date validation — all with no WordPress
 bootstrap, since predicates and serialisation are tested against
 fabricated `Course` objects. `composer stan` (PHPStan, level 8, against
@@ -460,7 +461,7 @@ Providers/Locations/Start Dates columns render correctly against real
   filters, pagination and response shape. Admin-screen capability checks
   are not yet covered.
 - **End-to-end tests** (implemented) —
-  `wp-content/plugins/course-discovery/tests/e2e/` (Playwright): 17 tests
+  `wp-content/plugins/course-discovery/tests/e2e/` (Playwright): 19 tests
   across `keyboard-operability.spec.js` (every interaction via
   `page.keyboard`, never a mouse, against the plain `<details>`/
   `<summary>` Categories filter — see Architectural Decisions),
@@ -469,12 +470,15 @@ Providers/Locations/Start Dates columns render correctly against real
   `aria-expanded`/`aria-activedescendant` tracking, arrow-key/Space/
   Escape keyboard behaviour, chronological start-date ordering, and that
   the hidden native checkbox — not just the visible widget — actually
-  carries the selection into a form submission), and
+  carries the selection into a form submission),
   `filter-narrows-results.spec.js` (a category filter narrows to the
   right courses, combining a checkbox-based Categories filter with a
   combobox-based Locations filter is AND not OR, Reset restores the full
-  set). Run via `npm test:e2e` from that directory against a running
-  instance (`COURSE_DISCOVERY_BASE_URL` to point at something other than
+  set), and `card-rendering-parity.spec.js` (the server-rendered card and
+  the JS-re-rendered card, after a JS-driven filter, show the same fields
+  in the same order — see Architectural Decisions). Run via
+  `npm test:e2e` from that directory against a running instance
+  (`COURSE_DISCOVERY_BASE_URL` to point at something other than
   `localhost:8080`).
 
 **High-risk areas** — the filter AND/OR composition logic; start date
@@ -590,6 +594,38 @@ provide a rendering surface for the plugin during development.
   Course rather than listing all Providers/Categories that exist — so an
   option that wouldn't return anything (e.g. a Provider with no Course
   assigned yet) never appears as a selectable filter value.
+- **The archive template shares one course fetch instead of running two,
+  in the specific case where that's actually valid.** Options must
+  always reflect *every* published Course regardless of the current
+  selection (the point above), while results must reflect only Courses
+  matching it — genuinely different queries whenever any filter is
+  active, so nothing here changes in that case. But when
+  `FilterCriteria::isEmpty()` (no filter/search selected at all — the
+  common first-page-view case), both queries are the *same* query: every
+  published Course, in default order. `templates/archive-course.php`
+  detects that case and fetches/hydrates once via
+  `CourseQueryBuilder::executeAll()`, deriving both `$result` (through
+  `CourseResultAssembler::assemble()` directly, no predicates to apply)
+  and `$options` (`FilterOptionsProvider::compute()` now takes an
+  optional pre-fetched `list<Course>`, only running its own query when
+  one isn't given — unaffected for the REST `/filters` endpoint's own
+  standalone calls) from the one result, instead of two independent
+  `WP_Query` + full-Course-hydration passes on every unfiltered page
+  view.
+- **Course cards: one field list, two renderers that can't be merged
+  into one — so a test enforces they can't drift instead.**
+  `templates/partials/course-card.php` (server-rendered) and
+  `assets/js/frontend.js`'s `courseCardHtml()` (client-rendered after a
+  JS-driven filter/paginate — see the progressive-enhancement note
+  below) render the same fields in the same order, but can't literally
+  share one template across the PHP/JS boundary the way, say,
+  `FilterOptionsProvider` is shared between REST and the template.
+  `tests/e2e/specs/card-rendering-parity.spec.js` asserts both paths
+  render the same field set in the same canonical order, so a field
+  (e.g. Providers/Instructors, both added here — they're already in
+  `CourseTransformer`'s REST payload and the domain model, just weren't
+  previously surfaced on the card) added to only one renderer fails a
+  real test instead of silently drifting.
 - **Two focused lookup tables, not one wide cross-product table.**
   `CreateFilterIndexTables` creates `course_discovery_course_providers`
   (course_id, provider_id, location_slug) and
@@ -1141,5 +1177,23 @@ but documented here as the intended evolution path.
      e2e tests pass against that same fresh, Plain-permalink instance.
   All three jobs (`quality`, `integration`, `e2e`) are green on a real
   run as of this entry, not just "should work."
+- 2026-07-25 — Addressed two findings from the earlier architecture
+  review: the archive template's redundant double course-query, and the
+  duplicated/incomplete course-card markup. Added
+  `FilterCriteria::isEmpty()` and an optional pre-fetched `list<Course>`
+  parameter on `FilterOptionsProvider::compute()` (also fixed a latent
+  bug found while adding its first unit test: `compute()` called
+  `apply_filters()` unconditionally, which would fatal outside a
+  WordPress bootstrap) so `templates/archive-course.php` fetches/hydrates
+  the course list once instead of twice when no filter is selected — see
+  Architectural Decisions for why that reuse is only valid in that
+  specific case, not in general. Added Providers/Instructors (already in
+  `CourseTransformer`'s REST payload, just never shown on the card) to
+  both `course-card.php` and `frontend.js`'s `courseCardHtml()`, and
+  added `card-rendering-parity.spec.js` so the two renderers' field
+  lists can't silently drift apart again. 8 new unit tests (77 total) +
+  2 new e2e tests (19 total); re-ran the full suite for real (77 unit +
+  37 integration + 19 e2e + PHPStan) rather than trusting it on
+  inspection — all green, no PHP errors in the container logs.
 
 </details>
