@@ -6,14 +6,17 @@ namespace OxfordInternational\CourseDiscovery\Frontend;
 
 /**
  * Renders one multi-select filter as a native `<details>`/`<summary>`
- * disclosure — collapsed by default, expands to a checkbox listbox on
- * click or Enter/Space on the summary. Chosen over a hand-rolled ARIA
- * `role="combobox"` widget deliberately: `<details>` gets its open/close
- * keyboard behaviour from the browser for free, works with zero custom
- * JS (the form still submits and filters correctly with JS disabled),
- * and avoids the well-known ways a custom combobox's keyboard handling
- * can be subtly wrong. See Assumptions Made for why this satisfies the
- * brief's "dropdown combobox" requirement for Locations/Start Dates.
+ * disclosure — collapsed by default, expands to a checkbox list on click
+ * or Enter/Space on the summary. Used as-is for Providers and Categories
+ * (the brief only requires "selection of multiple values" for those two),
+ * and as the working, JS-optional base markup for Locations and Start
+ * Dates, which `assets/js/combobox.js` progressively enhances into a real
+ * `role="combobox"`/`role="listbox"` widget with arrow-key/Home/End/
+ * typeahead navigation — see that file's docblock. The underlying
+ * checkboxes rendered here are never removed by that enhancement, only
+ * hidden, so this markup is what actually gets submitted either way, and
+ * is a fully working (if plainer) "dropdown combobox" on its own with
+ * JavaScript disabled.
  */
 final class FilterFieldRenderer
 {

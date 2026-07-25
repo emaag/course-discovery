@@ -2,10 +2,12 @@ const { test, expect } = require('@playwright/test');
 
 /**
  * No pointing device required, per the brief. Every interaction here uses
- * page.keyboard, never page.mouse/click — proving the native <details>/
- * <summary> disclosure pattern (see Frontend\FilterFieldRenderer) really
- * does get correct keyboard behaviour from the browser for free, with no
- * custom JS keyboard handling of our own to get wrong.
+ * page.keyboard, never page.mouse/click. These tests target the
+ * Categories filter specifically, which (unlike Locations/Start Dates —
+ * see combobox-filters.spec.js) is left as the plain native <details>/
+ * <summary> disclosure from Frontend\FilterFieldRenderer with no JS
+ * layered on top, proving that pattern gets correct keyboard behaviour
+ * from the browser for free.
  */
 test.describe('Keyboard-only operation', () => {
     test('a filter disclosure opens with Enter on its summary', async ({ page }) => {
@@ -23,12 +25,12 @@ test.describe('Keyboard-only operation', () => {
     test('a filter disclosure also opens with Space on its summary', async ({ page }) => {
         await page.goto('/');
 
-        const locations = page.locator('[data-course-discovery-filter="locations"]');
-        await locations.locator('summary').focus();
+        const providers = page.locator('[data-course-discovery-filter="providers"]');
+        await providers.locator('summary').focus();
 
         await page.keyboard.press('Space');
 
-        await expect(locations).toHaveAttribute('open', '');
+        await expect(providers).toHaveAttribute('open', '');
     });
 
     test('Tab moves from an opened summary into its checkbox options', async ({ page }) => {

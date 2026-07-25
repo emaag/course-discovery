@@ -24,8 +24,12 @@ test.describe('Selecting filters narrows results', () => {
         await page.locator('[data-course-discovery-filter="categories"] summary').click();
         await page.getByRole('checkbox', { name: 'Graphic Design' }).check();
 
+        // Locations is enhanced into an ARIA combobox by combobox.js (see
+        // combobox-filters.spec.js), so its options are listbox options,
+        // not checkboxes — unlike Categories above, which stays a plain
+        // checkbox disclosure.
         await page.locator('[data-course-discovery-filter="locations"] summary').click();
-        await page.getByRole('checkbox', { name: 'China' }).check();
+        await page.locator('[data-course-discovery-filter="locations"]').getByRole('option', { name: 'China' }).click();
 
         await page.getByRole('button', { name: 'Apply filters' }).click();
 

@@ -173,6 +173,41 @@
     font-size: 0.9rem;
 }
 
+/* --- Combobox listbox (JS-enhanced Locations/Start Dates only) --- */
+
+.course-discovery-combobox__listbox {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.course-discovery-combobox__option {
+    padding: 0.4rem 0.5rem;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.course-discovery-combobox__option::before {
+    content: "\2713";
+    display: inline-block;
+    width: 1.1rem;
+    color: transparent;
+}
+
+.course-discovery-combobox__option.is-selected::before {
+    color: var(--cd-accent);
+}
+
+.course-discovery-combobox__option.is-active {
+    background: var(--cd-surface-alt);
+    outline: 2px solid var(--cd-focus);
+    outline-offset: -2px;
+}
+
+.course-discovery-combobox__option:hover {
+    background: var(--cd-surface-alt);
+}
+
 .course-discovery-filters__actions {
     display: flex;
     align-items: center;

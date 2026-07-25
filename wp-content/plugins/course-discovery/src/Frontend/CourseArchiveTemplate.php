@@ -65,5 +65,13 @@ final class CourseArchiveTemplate
         wp_localize_script('course-discovery-frontend', 'CourseDiscoveryConfig', [
             'restUrl' => esc_url_raw(rest_url('course-discovery/v1/')),
         ]);
+
+        wp_enqueue_script(
+            'course-discovery-combobox',
+            COURSE_DISCOVERY_URL . 'assets/js/combobox.js',
+            [],
+            COURSE_DISCOVERY_VERSION,
+            true,
+        );
     }
 }
