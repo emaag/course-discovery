@@ -9,15 +9,16 @@
 ![Docker Compose](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)
 ![Status](https://img.shields.io/badge/status-in%20progress-yellow)
 
-Course Discovery is a WordPress plugin (with a minimal companion theme) that
-provides course search, filtering and discovery for an EdTech platform. It's
-built around a typed domain model, a composable filter pipeline, and a
-hook/event extension surface — see [Architectural Decisions](#architectural-decisions)
-for the reasoning.
+This is my submission for Oxford International's pre-interview technical
+exercise: a WordPress plugin (plus a small companion theme) for course
+search, filtering, and discovery on an EdTech platform. I built it around
+a typed domain model, a composable filter pipeline, and a hook-based
+extension surface, rather than the usual mesh of raw `WP_Post`/ACF arrays
+and inline `WP_Query` calls. The reasoning behind each choice is in
+[Architectural Decisions](#architectural-decisions).
 
-This is a pre-interview technical exercise for Oxford International. The
-verbatim task brief is preserved below for reference, followed by the
-project documentation and a running development log.
+The verbatim brief is below for reference, followed by the actual
+documentation and a build log.
 
 **Live deployment:** [courses.statichex.dev](https://courses.statichex.dev)
 
@@ -25,21 +26,22 @@ project documentation and a running development log.
 
 | Layer | State |
 |-------|-------|
-| Domain model (value objects + `Course`/`Instructor`/`Provider`) | ✅ Implemented, 30 unit tests passing |
+| Domain model (value objects + `Course`/`Instructor`/`Provider`) | ✅ Implemented |
 | Post types, taxonomy, ACF field groups | ✅ Implemented, verified live |
 | Dummy data seeder (`bin/seed.php`) | ✅ Implemented |
-| Query builder + filter pipeline | ✅ Implemented, verified against live seeded data, 25 unit tests passing |
+| Query builder + filter pipeline | ✅ Implemented, verified against live seeded data |
 | REST endpoint (`course-discovery/v1/courses`, `/filters`) | ✅ Implemented, verified live |
 | Frontend filter UI | ✅ Implemented, verified live |
 | Migrations / custom DB tables | ✅ Implemented, verified live |
 | Admin dashboard (Course list table columns) | ✅ Implemented, verified via integration tests |
 | Static analysis (PHPStan, level 8) | ✅ Implemented, clean (`composer stan`) |
-| Integration / feature tests (`WP_UnitTestCase`) | ✅ Implemented — 41 tests |
-| End-to-end (browser) tests | ✅ Implemented and verified — 19/19 passing |
-| CI (`.github/workflows/ci.yml`) | ✅ Implemented — quality/integration/e2e jobs on every push/PR |
+| Unit tests | ✅ 83 passing |
+| Integration / feature tests (`WP_UnitTestCase`) | ✅ 41 passing |
+| End-to-end (browser) tests | ✅ 19 passing |
+| CI (`.github/workflows/ci.yml`) | ✅ quality/integration/e2e jobs on every push/PR |
 
-Full detail is in [Architectural Decisions](#architectural-decisions) and the
-[Development Log](#development-log) at the bottom of this file.
+Full detail is in [Architectural Decisions](#architectural-decisions) and
+the [Development Log](#development-log) at the bottom of this file.
 
 <details>
 <summary><strong>Task Brief</strong> (reproduced verbatim from the exercise instructions — click to expand)</summary>
@@ -192,28 +194,28 @@ technologies.
 1. Clone this repository.
 2. Start the stack from the repository root:
 
-   ```bash
+   ```console
    docker compose up -d
    ```
 
 3. Visit **http://localhost:8080/wp-admin/install.php** and complete the
    WordPress install wizard (site title, admin username/password/email).
-   **Choose and note down your own admin credentials here** — the official
-   WordPress Docker image has no environment variable to pre-seed or later
-   recover the admin password (unlike the database credentials, see
-   [Retrieving credentials from Docker](#retrieving-credentials-from-docker)
-   below), so this is the only point they're set. If you forget them, either
-   use wp-admin's "Lost your password?" link (needs outbound email/SMTP,
-   not configured by default in this stack) or just start over —
-   `docker compose down -v && docker compose up -d` followed by this same
+   **Note your own admin credentials here** — the official WordPress
+   Docker image has no environment variable to pre-seed or recover the
+   admin password later (unlike the database credentials — see
+   [Retrieving credentials from Docker](#retrieving-credentials-from-docker)),
+   so this install step is the only point they're set. If you forget them,
+   either use wp-admin's "Lost your password?" link (needs outbound
+   email/SMTP, not configured by default here) or just start over —
+   `docker compose down -v && docker compose up -d`, then this same
    install step and `bin/seed.php` (see
-   [Development Commands](#development-commands)) reproduces the whole
+   [Development Commands](#development-commands)), rebuilds the whole
    environment from scratch in a couple of minutes.
 4. Log in to `/wp-admin/` and activate:
    - **Plugins → Course Discovery**
    - **Appearance → Themes → Course Discovery Theme**
 5. Install and activate **Advanced Custom Fields** (free edition) via
-   **Plugins → Add New → search "Advanced Custom Fields"** — this is the
+   **Plugins → Add New → search "Advanced Custom Fields"**. This is the
    one external plugin the brief allows, and the Course/Provider field
    groups (registered in code by the plugin) only appear once it's active.
 6. Visit **http://localhost:8080** to confirm the front end renders under
@@ -228,29 +230,28 @@ technologies.
 
 ## Production Deployment
 
-The live deployment is at **[courses.statichex.dev](https://courses.statichex.dev)**,
-on shared cPanel hosting rather than Docker — that environment has no
-Docker/root access, so it runs WordPress, the plugin and ACF directly
-under PHP-FPM, with its own isolated MySQL database. Same codebase, same
+Live at **[courses.statichex.dev](https://courses.statichex.dev)**, on
+shared cPanel hosting rather than Docker — that environment has no
+Docker/root access, so WordPress, the plugin, and ACF run directly under
+PHP-FPM, against their own isolated MySQL database. Same codebase, same
 plugin/theme, seeded with `bin/seed.php`.
 
-**HTTPS** is served by a self-managed Let's Encrypt certificate
+**HTTPS** runs on a self-managed Let's Encrypt certificate
 ([acme.sh](https://github.com/acmesh-official/acme.sh), installed under
-the account's home directory, no root needed), not cPanel's built-in
-AutoSSL — that feature is disabled at the hosting-package level
-(`uapi SSL get_autossl_problems` → `"You do not have the feature
-'autossl'"`) and, on this account, re-disables itself even after
-Namecheap support manually re-enables it. `acme.sh` issues the cert via
-HTTP-01 webroot validation and installs it through `uapi SSL
-install_ssl` — a separate API from the gated AutoSSL feature, so it
-works regardless. A reload hook re-installs the renewed cert into
-cPanel automatically after every renewal (a cron job checks
-periodically; Let's Encrypt certs are short-lived), so this shouldn't
-need manual attention going forward. This matters more than it might
-for a non-`.dev` domain: `.dev` is on every major browser's hardcoded
-HSTS-preload list, so a broken cert there makes the site completely
-unreachable over plain HTTP too — there's no insecure fallback a real
-visitor's browser will allow.
+the account's home directory, no root needed) rather than cPanel's
+built-in AutoSSL. AutoSSL is disabled at the hosting-package level on this
+account (`uapi SSL get_autossl_problems` → `"You do not have the feature
+'autossl'"`), and re-disables itself even after Namecheap support
+manually re-enables it — so I stopped relying on it. `acme.sh` issues the
+cert via HTTP-01 webroot validation and installs it through `uapi SSL
+install_ssl`, a separate API from the gated AutoSSL feature, so it works
+regardless. A reload hook re-installs the renewed cert into cPanel
+automatically after every renewal, so this shouldn't need manual
+attention going forward. This matters more than it might for a
+non-`.dev` domain: `.dev` is on every major browser's hardcoded
+HSTS-preload list, so a broken cert makes the site completely unreachable
+even over plain HTTP — there's no insecure fallback a real visitor's
+browser will allow.
 
 ## Environment Requirements
 
@@ -258,30 +259,28 @@ visitor's browser will allow.
 |--------------|---------|-------|
 | Docker & Docker Compose | — | Only host-side dependency needed to run the stack. |
 | WordPress | 7.0.2 | Pinned via the `wordpress:7.0.2-php8.2-apache` image in `docker-compose.yml`. |
-| PHP | 8.2+ | Matches the pinned image tag and the plugin's `composer.json` (`"php": ">=8.2"`). WordPress 7.0 itself recommends PHP 8.3+, but 8.2 remains supported — the image is pinned to 8.2 for now since that's what the plugin targets. |
+| PHP | 8.2+ | Matches the pinned image tag and the plugin's `composer.json` (`"php": ">=8.2"`). WordPress 7.0 recommends PHP 8.3+, but 8.2 is still supported and is what the plugin targets. |
 | MySQL | 8.0 | Provisioned by the `db` service. |
-| Composer | 2.x | Only needed on the host to install plugin dependencies and run tests (`wp-content/plugins/course-discovery/`) — not required inside the container. |
+| Composer | 2.x | Only needed on the host, to install plugin dependencies and run tests (`wp-content/plugins/course-discovery/`) — not required inside the container. |
 
 **WordPress 7.0.2 is a security release** (17 July 2026), patching a
 critical pre-authentication RCE chain (dubbed "wp2shell": CVE-2026-63030,
 a route-confusion issue in WordPress core's built-in REST batch endpoint
-— `/wp-json/batch/v1` — chained into the SQL injection in
-CVE-2026-60137, in `WP_Query`'s `author__not_in` parameter). This
-plugin's own REST endpoints (`course-discovery/v1/courses`,
-`.../filters`) are unaffected by that specific vector regardless of core
-version: both are registered read-only (`WP_REST_Server::READABLE`/
-`GET` only, in `REST/CourseSearchController` and
-`REST/FilterOptionsController`), take typed/sanitised input (declared
-arg schemas, `sanitize_text_field` for search), never accept or forward
-an `author__not_in` parameter, and aren't consumed through core's
-batch-request mechanism. Pinning to 7.0.2 patches the vulnerability at
-the WordPress core level either way — this is why, not a claim that the
-plugin's own endpoints were ever independently vulnerable.
+chained into a SQL injection in `WP_Query`'s `author__not_in` parameter,
+CVE-2026-60137). This plugin's own REST endpoints aren't exposed to that
+specific vector regardless of core version — both are read-only
+(`WP_REST_Server::READABLE`/`GET` only), take typed and sanitised input,
+never accept or forward an `author__not_in` parameter, and aren't
+consumed through core's batch-request mechanism. I still pinned to 7.0.2
+because it patches the vulnerability at the core level either way — this
+isn't a claim that the plugin's own endpoints were ever independently
+vulnerable, just standard due diligence.
 
 ## Database Setup
 
-The `db` service provisions a MySQL 8.0 database automatically on first run,
-using the credentials below (development only — do not reuse in production):
+The `db` service provisions a MySQL 8.0 database automatically on first
+run, using the credentials below (development only — don't reuse these
+in production):
 
 | Setting  | Value                                     |
 |----------|--------------------------------------------|
@@ -295,35 +294,35 @@ phpMyAdmin is available at `http://localhost:8081` for inspecting the
 database directly.
 
 A second database, `wordpress_test`, holds the integration test suite's
-data — kept separate from `wordpress` so running tests never touches dev
+data, kept separate from `wordpress` so running tests never touches dev
 content. See [Testing Instructions](#testing-instructions) for the
 one-time creation command.
 
 ### Retrieving credentials from Docker
 
-The values above are also set as plain environment variables on the running
-containers (development only — never do this for real secrets), so they can
-be read directly from Docker instead of trusting this table stays in sync
-with `docker-compose.yml`:
+The values above are also set as plain environment variables on the
+running containers (development only — never do this for real secrets),
+so you can read them straight from Docker instead of trusting this table
+stays in sync with `docker-compose.yml`:
 
 ```console
 docker compose exec wordpress printenv | grep WORDPRESS_DB_   # DB host/user/password/name, as WordPress sees them
 docker compose exec db printenv | grep MYSQL_                # MySQL root/user/password/database, as the db container sees them
 ```
 
-There's no equivalent lookup for the **WordPress admin** username/password —
-see the note in [Setup Instructions](#setup-instructions) step 3, since the
-official image doesn't expose those as environment variables.
+There's no equivalent lookup for the **WordPress admin** username/password
+— see the note in [Setup Instructions](#setup-instructions) step 3, since
+the official image doesn't expose those as environment variables.
 
 ### Importing a dump
 
-Drop a `.sql` (or `.sql.gz`) file into `db/` and it will be imported
+Drop a `.sql` (or `.sql.gz`) file into `db/` and it's imported
 automatically the first time the `db` container initialises an empty data
-volume (via MySQL's `/docker-entrypoint-initdb.d` mechanism). This only runs
-once per fresh volume — if `db_data` already exists, remove it first
+volume (via MySQL's `/docker-entrypoint-initdb.d` mechanism). This only
+runs once per fresh volume — if `db_data` already exists, remove it first
 (`docker compose down -v`) to trigger a re-import.
 
-To import into a database that's already running, instead run:
+To import into a database that's already running, run this instead:
 
 ```console
 docker compose exec -T db mysql -uwordpress -pwordpress wordpress < db/dump.sql
@@ -350,28 +349,28 @@ docker compose logs -f     # tail logs
 ```
 
 Seeding dummy data (run from the repository root, needs the WordPress/ACF
-runtime, so it's run inside the container rather than via composer):
+runtime, so it runs inside the container rather than via composer):
 
 ```console
 docker compose exec wordpress php wp-content/plugins/course-discovery/bin/seed.php
 ```
 
-Creates a fixed, realistic set of Providers, Instructors, hierarchical
-Categories and Courses (varied prices, multiple/overlapping start dates,
+Creates a fixed set of Providers, Instructors, hierarchical Categories,
+and Courses (varied prices, multiple/overlapping start dates,
 multi-provider courses to exercise the derived-Location logic). Safe to
 re-run — everything it creates is tagged with a `_course_discovery_seed`
 post meta flag and purged before reseeding, so it never touches other
-content and never accumulates duplicates. Regenerating content this way
-(rather than shipping a `.sql` dump) is intentional: the same command
-reproduces the same dataset on any environment, including the eventual
-public deployment, without transferring a database file.
+content and never duplicates. I regenerate content this way rather than
+shipping a `.sql` dump on purpose: the same command reproduces the same
+dataset on any environment, including the live deployment, without
+transferring a database file around.
 
-The specific Provider/Instructor/Course names, descriptions, prices and
-dates hard-coded in `bin/seed.php` were AI-generated as placeholder demo
-content — none of it represents real institutions, people, courses or
-data; only the script's structure (tagging, purge-before-reseed,
-validating dates through the `StartDate` value object) is functional code
-to review.
+The specific Provider/Instructor/Course names, descriptions, prices, and
+dates hard-coded in `bin/seed.php` are AI-generated placeholder demo
+content — none of it represents real institutions, people, or courses.
+Only the script's structure (tagging, purge-before-reseed, validating
+dates through the `StartDate` value object) is functional code worth
+reviewing.
 
 ## Testing Instructions
 
@@ -392,10 +391,10 @@ docker compose exec wordpress php wp-content/plugins/course-discovery/vendor/bin
   -c wp-content/plugins/course-discovery/phpunit-integration.xml.dist
 ```
 
-(`composer test:integration` runs the same command, but only works when
-run from inside the container for the same ABSPATH/DB-host reasons.) The
-test database (`wordpress_test` on the same `db` service, separate from
-the dev `wordpress` database) needs creating once:
+(`composer test:integration` runs the same command, but only works from
+inside the container, for the same ABSPATH/DB-host reasons.) The test
+database (`wordpress_test` on the same `db` service, separate from the
+dev `wordpress` database) needs creating once:
 
 ```console
 docker compose exec -T db mysql -uroot -proot -e \
@@ -416,21 +415,22 @@ Assumes the local stack is up and seeded (`bin/seed.php`) — the tests
 assert against that exact dataset (16 courses, 3 tagged "Graphic
 Design"). Point elsewhere with `COURSE_DISCOVERY_BASE_URL=https://...`.
 
-**Current coverage:** 83 unit tests — `Domain/ValueObject` (`PostId`,
-`Price`, `StartDate`, `Location`, `CategoryTerm`), `Domain/Model`'s
-`Course::locations()` derivation logic, `Filter\FilterCriteria` parsing
-and its `isEmpty()` shared-fetch signal, every concrete `Filter`'s
-contribution to the query builder, the `FilterPipeline`'s end-to-end
-AND/OR composition, `Query\CourseResultAssembler`'s filter/pagination
-math, `Query\FilterOptionsProvider`'s option derivation given a
-pre-fetched Course list, `REST\CourseTransformer`'s Course→JSON
-conversion, `Migration\FilterIndexSync`'s row-computation logic,
+**Current coverage:** 83 unit tests covering `Domain/ValueObject`
+(`PostId`, `Price`, `StartDate`, `Location`, `CategoryTerm`),
+`Domain/Model`'s `Course::locations()` derivation logic,
+`Filter\FilterCriteria` parsing and its `isEmpty()` shared-fetch signal,
+every concrete `Filter`'s contribution to the query builder, the
+`FilterPipeline`'s end-to-end AND/OR composition,
+`Query\CourseResultAssembler`'s filter/pagination math,
+`Query\FilterOptionsProvider`'s option derivation given a pre-fetched
+Course list, `REST\CourseTransformer`'s Course→JSON conversion,
+`Migration\FilterIndexSync`'s row-computation logic,
 `Field\CourseFieldGroup`'s start-date validation, and
 `Security\CoreHardening`'s REST route-matching logic — all with no
 WordPress bootstrap, since predicates and serialisation are tested
 against fabricated `Course` objects. `composer stan` (PHPStan, level 8,
-against the WordPress/ACF Pro stubs) runs clean alongside these as a
-second, static gate — see Architectural Decisions.
+against the WordPress/ACF Pro stubs) runs alongside these as a second,
+static gate — see Architectural Decisions.
 
 Plus **41 integration tests** (`wp-phpunit` + `yoast/phpunit-polyfills`,
 against the plugin's own real WordPress install) across nine suites:
@@ -442,45 +442,45 @@ set, ACF hydration end to end), `RestEndpointIntegrationTest` (the actual
 registered routes dispatched through `WP_REST_Server`, not just direct
 PHP calls), `StartDateFilterIntegrationTest` (chronological ordering and
 single/multi start-date filtering), `FilterIndexSyncIntegrationTest`
-(the migration actually created both lookup tables, and saving/deleting/
+(the migration creates both lookup tables, and saving/deleting/
 unpublishing a real Course keeps them in sync via the real
 `save_post_course`/`before_delete_post` hooks),
 `ExtensibilityHooksIntegrationTest` (each of the five extensibility
 examples the brief names — registering a new filter, modifying query
 args, customising ordering, transforming raw criteria, altering filter
 options — proven with a real third-party `add_filter()` callback that
-never touches an existing class),
-`MalformedStartDateIntegrationTest` (a start date written directly to
-postmeta, bypassing ACF's own validation entirely, is skipped rather
-than crashing every page that lists courses), `CourseListTableIntegrationTest`
-(the wp-admin Course list table's Price/Providers/Locations/Start Dates
-columns render correctly against real `WP_Post`/ACF data, including the
-numeric — not lexical — price sort), and `CoreHardeningIntegrationTest`
-(an anonymous request to core's `/wp/v2/users` is rejected, a logged-in
-administrator can still use it, this plugin's own public routes are
-unaffected, and the `generator` tag is actually suppressed).
+never touches an existing class), `MalformedStartDateIntegrationTest` (a
+start date written directly to postmeta, bypassing ACF's own validation
+entirely, is skipped rather than crashing every page that lists courses),
+`CourseListTableIntegrationTest` (the wp-admin Course list table's
+Price/Providers/Locations/Start Dates columns render correctly against
+real `WP_Post`/ACF data, including the numeric — not lexical — price
+sort), and `CoreHardeningIntegrationTest` (an anonymous request to core's
+`/wp/v2/users` is rejected, a logged-in administrator can still use it,
+this plugin's own public routes are unaffected, and the `generator` tag
+is actually suppressed).
 
 ### Strategy
 
-- **Unit tests** — value objects (e.g. price, start date, slug wrappers) and
-  individual `Filter` implementations tested in isolation, no WordPress
+- **Unit tests** — value objects (price, start date, slug wrappers) and
+  individual `Filter` implementations, tested in isolation, no WordPress
   bootstrap required. This is where filter *logic* correctness (AND/OR
-  composition, edge cases like an empty selection or an unknown value) is
-  covered cheaply and fast.
-- **Integration tests** (implemented) — filters and the query builder
-  tested against a real WordPress test database (`WP_UnitTestCase` /
-  wp-phpunit), asserting actual results from real `WP_Query`/`tax_query`/
-  ACF data, each test creating its own fixtures rather than relying on
-  `bin/seed.php`'s data. This is the layer that catches WordPress-specific
-  surprises (meta query quirks, taxonomy joins) unit tests can't see — and
-  it already has: see the `CourseSearchClause` incident in the
-  Development Log below, found by exactly this suite.
-- **Feature tests** (implemented, folded into the integration suite) —
-  `RestEndpointIntegrationTest` exercises full filter requests end-to-end
+  composition, edge cases like an empty selection or an unknown value)
+  gets covered cheaply and fast.
+- **Integration tests** — filters and the query builder tested against a
+  real WordPress test database (`WP_UnitTestCase`/wp-phpunit), asserting
+  actual results from real `WP_Query`/`tax_query`/ACF data, each test
+  creating its own fixtures rather than relying on `bin/seed.php`'s data.
+  This is the layer that catches WordPress-specific surprises — meta
+  query quirks, taxonomy joins — that unit tests structurally can't see.
+  It's already caught one for real: see the `CourseSearchClause` incident
+  in the Development Log below.
+- **Feature tests** — folded into the integration suite.
+  `RestEndpointIntegrationTest` exercises full filter requests end to end
   through the real REST server (`WP_REST_Server::dispatch()`), combined
-  filters, pagination and response shape. Admin-screen capability checks
-  are not yet covered.
-- **End-to-end tests** (implemented) —
+  filters, pagination, and response shape. Admin-screen capability checks
+  aren't covered yet.
+- **End-to-end tests** —
   `wp-content/plugins/course-discovery/tests/e2e/` (Playwright): 19 tests
   across `keyboard-operability.spec.js` (every interaction via
   `page.keyboard`, never a mouse, against the plain `<details>`/
@@ -503,26 +503,26 @@ unaffected, and the `generator` tag is actually suppressed).
 
 **High-risk areas** — the filter AND/OR composition logic; start date
 parsing/formatting and chronological ordering of the `{month}-{year}`
-combobox; the derived Location-from-Provider relationship; and any custom
-SQL in lookup tables (highest regression risk since it bypasses WP_Query's
-own testing surface).
+combobox; the derived Location-from-Provider relationship; any custom SQL
+in the lookup tables (highest regression risk, since it bypasses
+`WP_Query`'s own testing surface).
 
-**Regression prevention** — each `Filter` implementation ships with a fixed
-fixture set (known Courses/Providers/Locations) and a table of
+**Regression prevention** — each `Filter` implementation ships with a
+fixed fixture set (known Courses/Providers/Locations) and a table of
 input-selection → expected-result-IDs cases (`tests/Unit/Filter/*Test.php`),
-run via `composer test`. Query-*shape* assertions, not just result counts,
-are used for the filters most likely to regress silently — e.g.
-`CategoryFilterTest` asserts the exact `tax_query` array produced, not
-just which courses come back — since a wrong-but-similar SQL join can
-still return plausible-looking results. `.github/workflows/ci.yml` runs
-unit + PHPStan, the integration suite, and the full Playwright suite in
-three separate jobs on every push/PR — see Architectural Decisions for
-how it gets a real WordPress core and ACF into the integration/e2e jobs
-without either depending on a live install.
+run via `composer test`. Query-*shape* assertions, not just result
+counts, are used for the filters most likely to regress silently —
+`CategoryFilterTest`, for example, asserts the exact `tax_query` array
+produced, not just which courses come back, since a wrong-but-similar SQL
+join can still return plausible-looking results.
+`.github/workflows/ci.yml` runs unit + PHPStan, the integration suite,
+and the full Playwright suite in three separate jobs on every push/PR —
+see Architectural Decisions for how it gets a real WordPress core and ACF
+into the integration/e2e jobs without either depending on a live install.
 
-**Testing new filters** — because every filter implements the same
-`Filter` contract (see Architectural Decisions below), each has its own
-focused unit test following an identical pattern: apply the filter to a
+**Testing new filters** — every filter implements the same `Filter`
+contract (see Architectural Decisions), so each has its own focused unit
+test following the same pattern: apply the filter to a
 `CourseQueryBuilder` with given criteria, then inspect the builder's
 state via its `taxQuery()`/`searchTerm()`/`postFilterPredicates()`
 getters (for a tax_query- or search-based filter) or invoke the
@@ -532,8 +532,8 @@ new filter follows the same template rather than needing bespoke test
 plumbing invented from scratch. There isn't a single generic contract
 test that runs automatically against every registered filter — that
 would be a reasonable follow-up (a shared test trait/base asserting "no
-criteria ⇒ no contribution" and similar invariants across all filters)
-rather than something built for this exercise.
+criteria ⇒ no contribution" and similar invariants) rather than something
+I built for this exercise.
 
 ## Architectural Decisions
 
@@ -557,753 +557,509 @@ The plugin follows a namespaced, PSR-4 structure under
 | `Security`           | `CoreHardening` — restricts core's `GET /wp/v2/users` REST route to authenticated requests and suppresses the `generator` version-disclosure meta tag; found via a manual security audit, not part of the brief. | ✅ Implemented |
 
 ACF (Advanced Custom Fields, free edition) is installed and active as the
-one external plugin the brief allows. Its field groups are defined in code
-rather than left as UI-only config, so the schema versions alongside the
-domain model that reads it — see the docblock on `Course::fromPost()` for
-the exact field names each group must keep in sync with.
+one external plugin the brief allows. Its field groups are defined in
+code rather than left as UI-only config, so the schema stays versioned
+alongside the domain model that reads it — see the docblock on
+`Course::fromPost()` for the exact field names each group has to keep in
+sync with.
 
-The theme (`course-discovery-theme`) is intentionally minimal and exists to
-provide a rendering surface for the plugin during development.
+The theme (`course-discovery-theme`) is deliberately minimal — it exists
+to give the plugin a rendering surface, not to carry any logic itself.
 
 ### Design decisions
 
-Grouped by concern, rather than one flat list — jump to whichever you care about.
+Grouped by concern rather than one long flat list — jump to whichever you
+care about.
 
 #### Domain modelling
 
-- **Value objects over primitives.** e.g. price is a `Price` value object
-  (not a bare float) so currency/formatting/future range support has one
-  home; start dates are a `StartDate` value object that knows how to
-  format/compare/sort chronologically, rather than passing month/year
-  strings around and re-parsing them wherever ordering is needed.
-- **Locations as derived, not stored.** Since Location is derived from
-  Provider, it's computed/read from the Provider relationship rather than
-  duplicated as its own Course meta field, avoiding a second source of
-  truth that could drift.
-- **ACF for field storage, domain layer for meaning.** ACF is used purely
-  as the admin data-entry/storage mechanism (the only allowed external
-  plugin); all business logic and typed access goes through the
-  `Domain/Model` and `Domain/ValueObject` layer so the rest of the codebase
-  never touches `get_field()` calls directly.
-- **Malformed start dates are prevented at entry and tolerated at read
-  time — two layers, not one.** `Field\CourseFieldGroup` validates the
+- **Value objects over primitives.** Price is a `Price` value object, not
+  a bare float, so currency/formatting/future range support has one
+  home. Start dates are a `StartDate` value object that knows how to
+  format, compare, and sort chronologically, rather than passing
+  month/year strings around and re-parsing them wherever ordering is
+  needed.
+- **Locations as derived, not stored.** Location comes from Provider, so
+  it's computed/read from the Provider relationship rather than
+  duplicated as its own Course meta field — that avoids a second source
+  of truth that could drift out of sync.
+- **ACF for field storage, domain layer for meaning.** ACF is purely the
+  admin data-entry/storage mechanism (the only allowed external plugin);
+  all business logic and typed access goes through `Domain/Model` and
+  `Domain/ValueObject`, so nothing outside that layer touches
+  `get_field()` directly.
+- **Malformed start dates: prevented at entry, tolerated at read time —
+  two layers, not one.** `Field\CourseFieldGroup` validates the
   `start_date` sub-field via `acf/validate_value`, rejecting anything
-  that doesn't parse as `StartDate` before it ever reaches the database.
-  But `acf/validate_value` only runs for the real wp-admin form — ACF's
-  own `update_field()` API, a row written before validation existed, or
-  a future import script all bypass it entirely. So
-  `Course::hydrateStartDates()` also catches a malformed value and skips
-  it (logging why) rather than letting one bad row throw an uncaught
-  exception that would take down every page that lists courses — the
-  REST API, the frontend, everything. Found this gap and fixed both
-  layers together; see `MalformedStartDateIntegrationTest`.
+  that doesn't parse as `StartDate` before it reaches the database. But
+  `acf/validate_value` only runs for the real wp-admin form — ACF's own
+  `update_field()` API, a row written before validation existed, or a
+  future import script all bypass it. So `Course::hydrateStartDates()`
+  also catches a malformed value and skips it (logging why), rather than
+  letting one bad row throw an uncaught exception that takes down every
+  page listing courses. I found this gap and fixed both layers together
+  — see `MalformedStartDateIntegrationTest`.
 
 #### Filtering & querying
 
 - **Composition over inheritance.** Filters are separate, independently
-  testable classes composed by `FilterPipeline` rather than built as
-  subclasses of a base "filter" class. Each filter only needs to know how
-  to contribute its own criteria to a `CourseQueryBuilder` — nothing else
-  depends on its internals.
-- **Specification-style composition for AND/OR grouping.** `FilterCriteria`
-  holds the full selection as typed lists; each `Filter` combines *its own*
-  selected values with OR (an `IN` tax_query operator, or a predicate
-  matching any selected value), and `FilterPipeline`/`CourseQueryBuilder`/
-  `CourseResultAssembler` require every filter to match, i.e. AND across
-  filters — mirroring the brief's example
-  `(provider = A OR provider = B) AND (location = X OR location = Y)`. The
-  AND-across-filters composition lives in one place (the assembler) rather
-  than being reimplemented per filter, so it can't drift between filter
-  types.
+  testable classes composed by `FilterPipeline`, not subclasses of a base
+  "filter" class. Each one only needs to know how to contribute its own
+  criteria to a `CourseQueryBuilder` — nothing else depends on its
+  internals.
+- **Specification-style composition for AND/OR grouping.**
+  `FilterCriteria` holds the full selection as typed lists. Each `Filter`
+  combines *its own* selected values with OR (an `IN` tax_query operator,
+  or a predicate matching any selected value), and
+  `FilterPipeline`/`CourseQueryBuilder`/`CourseResultAssembler` require
+  every filter to match — AND across filters — mirroring the brief's
+  example `(provider = A OR provider = B) AND (location = X OR location = Y)`.
+  The AND-across-filters composition lives in exactly one place, the
+  assembler, rather than being reimplemented per filter, so it can't
+  drift between filter types.
 - **SQL-native filtering where it's reliable, in-PHP where it isn't.**
   `CategoryFilter` pushes down into a real `tax_query` clause, since
-  categories are an indexed WordPress taxonomy relationship. `Provider`,
-  `Location` and `StartDate` filter as in-PHP predicates over already-
-  hydrated `Course` objects instead: ACF stores those fields as a single
-  serialized value per post, and a `meta_query` `LIKE`/`IN` match against
-  that serialized value risks false positives against the array's own
-  index tokens, not just its stored values — exactly the "wrong-but-
-  similar SQL join" the Testing Instructions flag as highest regression
-  risk. Matching against typed, already-parsed domain objects removes that
-  ambiguity entirely, at the cost of fetching the full candidate set
-  before pagination (see `CourseQueryBuilder`'s docblock, and Performance &
-  Scalability for the evolution path).
+  categories are an indexed WordPress taxonomy relationship.
+  `Provider`, `Location`, and `StartDate` filter as in-PHP predicates
+  over already-hydrated `Course` objects instead: ACF stores those
+  fields as a single serialized value per post, and a `meta_query`
+  `LIKE`/`IN` match against that value risks false positives against the
+  array's own index tokens, not just its stored values — exactly the
+  "wrong-but-similar SQL join" the Testing Instructions flag as highest
+  regression risk. Matching against typed, already-parsed domain objects
+  removes that ambiguity entirely, at the cost of fetching the full
+  candidate set before pagination (see `CourseQueryBuilder`'s docblock,
+  and Performance & Scalability for the evolution path).
 - **`WP_Query` abstraction.** Domain code never builds raw `WP_Query` arg
-  arrays inline; a query builder translates typed filter criteria into
-  `WP_Query`/`WP_Meta_Query`/`WP_Tax_Query` arguments in one place, which is
-  also what integration tests assert against.
-- **The archive template shares one course fetch instead of running two,
-  in the specific case where that's actually valid.** Options must
-  always reflect *every* published Course regardless of the current
-  selection, while results must reflect only Courses matching it —
-  genuinely different queries whenever any filter is active, so nothing
-  here changes in that case. But when `FilterCriteria::isEmpty()` (no
-  filter/search selected at all — the common first-page-view case), both
-  queries are the *same* query: every published Course, in default order.
-  `templates/archive-course.php` detects that case and fetches/hydrates
-  once via `CourseQueryBuilder::executeAll()`, deriving both `$result`
-  (through `CourseResultAssembler::assemble()` directly, no predicates to
-  apply) and `$options` (`FilterOptionsProvider::compute()` now takes an
-  optional pre-fetched `list<Course>`, only running its own query when
-  one isn't given — unaffected for the REST `/filters` endpoint's own
-  standalone calls) from the one result, instead of two independent
-  `WP_Query` + full-Course-hydration passes on every unfiltered page
-  view.
+  arrays inline — a query builder translates typed filter criteria into
+  `WP_Query`/`WP_Meta_Query`/`WP_Tax_Query` arguments in one place, which
+  is also what integration tests assert against.
+- **The archive template shares one course fetch instead of running two
+  — but only where that's actually valid.** Options must always reflect
+  *every* published Course regardless of the current selection, while
+  results must reflect only Courses matching it — genuinely different
+  queries whenever any filter is active, so nothing changes there. But
+  when `FilterCriteria::isEmpty()` (no filter/search selected — the
+  common first-page-view case), both queries are the *same* query: every
+  published Course, in default order. `templates/archive-course.php`
+  detects that case and fetches/hydrates once via
+  `CourseQueryBuilder::executeAll()`, deriving both `$result` (through
+  `CourseResultAssembler::assemble()` directly) and `$options`
+  (`FilterOptionsProvider::compute()` takes an optional pre-fetched
+  `list<Course>`, only running its own query when one isn't given —
+  unaffected for the REST `/filters` endpoint's own standalone calls)
+  from that one result, instead of two independent `WP_Query` +
+  full-Course-hydration passes on every unfiltered page view.
 - **Two focused lookup tables, not one wide cross-product table.**
   `CreateFilterIndexTables` creates `course_discovery_course_providers`
   (course_id, provider_id, location_slug) and
-  `course_discovery_course_start_dates` (course_id, start_date) — kept
+  `course_discovery_course_start_dates` (course_id, start_date), kept
   live by `FilterIndexSync` on every Course save/delete. A course with 2
-  providers and 3 start dates needs 5 rows split across two single-
-  purpose tables rather than 6 in one table crossing every dimension
-  together, and each table stays independently indexable. Categories
-  aren't duplicated here — `course_category` is a real taxonomy already
-  backed by an indexed join (`wp_term_relationships`). **Not yet wired
-  into `CourseQueryBuilder`**: the existing in-PHP-predicate filters are
-  simpler, already thoroughly tested, and correct at this project's
-  scale — these tables exist and stay accurate as the documented
-  Performance & Scalability evolution path, ready to become the query
-  source without a risky "build the index and cut over in the same
-  change" step.
+  providers and 3 start dates needs 5 rows split across two
+  single-purpose tables rather than 6 in one table crossing every
+  dimension together, and each table stays independently indexable.
+  Categories aren't duplicated here — `course_category` is a real
+  taxonomy already backed by an indexed join (`wp_term_relationships`).
+  **Not yet wired into `CourseQueryBuilder`**: the existing in-PHP
+  predicate filters are simpler, already thoroughly tested, and correct
+  at this project's scale. These tables exist and stay accurate as the
+  documented Performance & Scalability evolution path — ready to become
+  the query source without a risky "build the index and cut over in the
+  same change" step.
 
 #### Extensibility
 
 - **Hook/event pipeline for extensibility.** Filters register themselves
-  via `course_discovery_filters`; `CourseQueryBuilder` fires
+  via `course_discovery_filters`. `CourseQueryBuilder` fires
   `course_discovery_query_args` (modify `WP_Query` args before execution)
   and `course_discovery_order_courses` (customise result ordering, over
-  the hydrated `Course` list rather than just `WP_Query`'s `orderby`);
+  the hydrated `Course` list, not just `WP_Query`'s `orderby`).
   `FilterCriteria::fromArray()` fires `course_discovery_transform_criteria`
-  (rewrite raw search criteria before it's typed); `FilterOptionsController`
-  fires `course_discovery_filter_options` (alter the available Provider/
-  Location/Category/StartDate option lists returned to the frontend). New
-  filters, altered query args, custom ordering, or altered filter options
-  are all addable by third-party code hooking in, with no changes to any
-  existing filter/controller class — proven, not just asserted:
-  `ExtensibilityHooksIntegrationTest` registers a real `add_filter()`
-  callback against each of these five hooks and confirms the resulting
-  behaviour actually changes.
+  (rewrite raw search criteria before it's typed). `FilterOptionsController`
+  fires `course_discovery_filter_options` (alter the available option
+  lists returned to the frontend). New filters, altered query args,
+  custom ordering, altered filter options — all addable by third-party
+  code hooking in, with no changes to any existing filter/controller
+  class. Proven, not just asserted: `ExtensibilityHooksIntegrationTest`
+  registers a real `add_filter()` callback against each of these five
+  hooks and checks the behaviour actually changes.
 - **Filter options derived from live data, not configuration.** `GET
-  /filters` computes its option lists by walking every currently published
-  Course rather than listing all Providers/Categories that exist — so an
-  option that wouldn't return anything (e.g. a Provider with no Course
-  assigned yet) never appears as a selectable filter value.
+  /filters` computes its option lists by walking every currently
+  published Course rather than listing all Providers/Categories that
+  exist, so an option that wouldn't return anything (a Provider with no
+  Course assigned yet, say) never appears as a selectable filter value.
 
 #### Frontend
 
-- **Frontend as progressive enhancement, not a JS-only app.**
+- **Progressive enhancement, not a JS-only app.**
   `templates/archive-course.php` reads filter selections straight from
   `$_GET` and renders through the exact same `FilterCriteria`/
-  `FilterPipeline`/`CourseQueryBuilder` the REST API uses — so the page
+  `FilterPipeline`/`CourseQueryBuilder` the REST API uses, so the page
   filters correctly via a normal form submission with JavaScript
   disabled. `assets/js/frontend.js` only replaces that full-page reload
   with a `fetch` against `course-discovery/v1/courses` and an in-place
-  DOM update; it never introduces filtering logic that doesn't already
-  exist server-side, so the two can't drift out of sync with each other.
+  DOM update — it never introduces filtering logic that doesn't already
+  exist server-side, so the two can't drift out of sync.
 - **Multi-select combobox: a working native `<details>`/`<summary>`
   disclosure as the base, upgraded to a real `role="combobox"`/
   `role="listbox"` widget by JS for exactly the two filters the brief
   requires it for.** `FilterFieldRenderer` renders all four multi-selects
-  (Providers, Locations, Categories, Start Dates) as the same `<details>`/
-  checkbox disclosure — closed by default, correct open/close keyboard
-  behaviour from the browser for free, works with JavaScript entirely
-  disabled. For Locations and Start Dates specifically (the two the brief
-  names as needing a "dropdown combobox"), `assets/js/combobox.js`
-  progressively enhances that markup into an ARIA 1.2 combobox: the
-  `<summary>` becomes the `role="combobox"` trigger, a generated
-  `role="listbox"` replaces the visible checkbox rows, and keyboard
-  support (arrow keys, Home/End, typeahead, Space to toggle the active
-  option without closing — multi-select shouldn't close on select, Escape
-  to close and return focus to the trigger) is implemented against
+  (Providers, Locations, Categories, Start Dates) as the same
+  `<details>`/checkbox disclosure — closed by default, correct
+  open/close keyboard behaviour from the browser for free, works with
+  JavaScript entirely disabled. For Locations and Start Dates
+  specifically (the two the brief names as needing a "dropdown
+  combobox"), `assets/js/combobox.js` progressively enhances that markup
+  into an ARIA 1.2 combobox: the `<summary>` becomes the
+  `role="combobox"` trigger, a generated `role="listbox"` replaces the
+  visible checkbox rows, and keyboard support (arrow keys, Home/End,
+  typeahead, Space to toggle the active option without closing — it's
+  multi-select, so it shouldn't close on select — Escape to close and
+  return focus to the trigger) tracks the active option via
   `aria-activedescendant` rather than moving real DOM focus into the
-  list, which is the more robust of the two focus-management models the
-  ARIA combobox pattern documents. Providers and Categories are left as
-  the plain disclosure, since the brief only requires "selection of
-  multiple values" for those two, not a combobox.
-  The original checkboxes are never removed, only hidden (`hidden`, not
-  `display:none` via a class, though the effect is the same) — a hidden
-  form control is still a submitted one, so this JS layer only changes
-  what's *seen and interacted with*, never what's actually sent. The page
-  degrades to the plain checkbox disclosure — semantically correct,
-  keyboard-operable, and satisfying "selection of multiple values" on its
-  own — with JavaScript disabled or failed to load. See the class's own
-  docblock, `assets/js/combobox.js`'s docblock, and Assumptions Made
-  below.
+  list, which is the more robust of the two documented ARIA combobox
+  focus-management models. Providers and Categories stay the plain
+  disclosure, since the brief only requires "selection of multiple
+  values" for those two, not a combobox. The original checkboxes are
+  never removed, only hidden — a hidden form control still submits, so
+  this JS layer only changes what's *seen and interacted with*, never
+  what's actually sent. The page degrades to the plain checkbox
+  disclosure with JavaScript disabled or failed to load — still
+  semantically correct, keyboard-operable, and satisfying "selection of
+  multiple values" on its own. See the class's own docblock,
+  `assets/js/combobox.js`'s docblock, and Assumptions Made below.
 - **Course cards: one field list, two renderers that can't be merged
   into one — so a test enforces they can't drift instead.**
   `templates/partials/course-card.php` (server-rendered) and
   `assets/js/frontend.js`'s `courseCardHtml()` (client-rendered after a
   JS-driven filter/paginate) render the same fields in the same order,
   but can't literally share one template across the PHP/JS boundary the
-  way, say, `FilterOptionsProvider` is shared between REST and the
-  template. `tests/e2e/specs/card-rendering-parity.spec.js` asserts both
-  paths render the same field set in the same canonical order, so a
-  field (e.g. Providers/Instructors, both added here — they're already in
-  `CourseTransformer`'s REST payload and the domain model, just weren't
-  previously surfaced on the card) added to only one renderer fails a
-  real test instead of silently drifting.
+  way `FilterOptionsProvider` is shared between REST and the template.
+  `tests/e2e/specs/card-rendering-parity.spec.js` asserts both paths
+  render the same field set in the same canonical order, so a field
+  added to only one renderer fails a real test instead of silently
+  drifting. (Providers/Instructors, added here, are a case in point —
+  both were already in `CourseTransformer`'s REST payload and the domain
+  model, just never surfaced on the card.)
 
 #### Testing & tooling
 
-- **PHPStan (level 8) as a second, static gate alongside the test suite.**
-  `phpstan.neon.dist` runs against `src/` using `wordpress-stubs` and
-  `acf-pro-stubs` (via `szepeviktor/phpstan-wordpress`), so type errors
-  involving WordPress/ACF's own loosely-typed APIs (`get_field()`
-  returning `mixed`, `WP_Query::$posts` being `WP_Post[]|int[]`
-  depending on the `fields` arg) are caught, not just this plugin's own
-  code. It's a genuinely useful complement to the test suite rather than
-  a checkbox: it directly caught two real gaps — an `array_map()` over an
-  associative array silently losing its `list<>` shape without
-  `array_values()`, and `CourseQueryBuilder` assuming `WP_Query::$posts`
-  is always `WP_Post[]`, which isn't true once the
+- **PHPStan (level 8) as a second, static gate alongside the test
+  suite.** `phpstan.neon.dist` runs against `src/` using
+  `wordpress-stubs` and `acf-pro-stubs` (via `szepeviktor/phpstan-wordpress`),
+  so type errors involving WordPress/ACF's own loosely-typed APIs
+  (`get_field()` returning `mixed`, `WP_Query::$posts` being
+  `WP_Post[]|int[]` depending on the `fields` arg) get caught, not just
+  this plugin's own code. It's a genuinely useful complement to the test
+  suite, not a checkbox — it directly caught two real gaps: an
+  `array_map()` over an associative array silently losing its `list<>`
+  shape without `array_values()`, and `CourseQueryBuilder` assuming
+  `WP_Query::$posts` is always `WP_Post[]`, which isn't true once the
   `course_discovery_query_args` hook lets a third party set
   `fields => 'ids'`. `composer stan` runs clean.
-- **CI in three jobs, matched to what each layer actually needs — not one
-  monolithic job.** `.github/workflows/ci.yml`:
+- **CI in three jobs, matched to what each layer actually needs — not
+  one monolithic job.** `.github/workflows/ci.yml`:
   - `quality` — `composer test` + `composer stan`. Pure PHP, no
     WordPress, so it's the fast gate the other two jobs wait on
     (`needs: quality`) rather than burning minutes on integration/e2e
     against code that's already known-broken.
-  - `integration` — real `WP_UnitTestCase` against a real WordPress core.
-    Rather than spinning up the full Docker stack just for this,
+  - `integration` — real `WP_UnitTestCase` against a real WordPress
+    core. Rather than spinning up the full Docker stack just for this,
     `wp-tests-config-integration.php`'s bootstrap only actually needs two
     things: WordPress core class/function *files* on disk (ABSPATH), and
     ACF's `acf.php` on disk at a predictable path — wp-phpunit installs
-    its own test database and tables itself, and this plugin's own
-    bootstrap `require`s ACF directly (see `tests/bootstrap-integration.php`)
-    rather than depending on a real "activation". So the CI job downloads
-    WordPress core + ACF as plain tarball/zip and symlinks this repo's
-    plugin directory in — no install wizard, no admin user, no running
-    site — against a `mysql:8.0` service container. `ABSPATH`/`DB_*` were
-    already read from env vars with the Docker Compose values as
-    defaults (`WP_TESTS_ABSPATH` was the one addition — previously
-    hardcoded to `/var/www/html/`), so the exact same suite runs
-    unmodified in both places.
+    its own test database and tables, and this plugin's own bootstrap
+    `require`s ACF directly (see `tests/bootstrap-integration.php`)
+    rather than depending on a real "activation." So the CI job
+    downloads WordPress core + ACF as a plain tarball/zip and symlinks
+    this repo's plugin directory in — no install wizard, no admin user,
+    no running site — against a `mysql:8.0` service container.
+    `ABSPATH`/`DB_*` were already read from env vars with the Docker
+    Compose values as defaults (`WP_TESTS_ABSPATH` was the one addition
+    — previously hardcoded to `/var/www/html/`), so the exact same suite
+    runs unmodified in both places.
   - `e2e` — the one job that does need a real running, installed site
     (to actually click through in a browser), so it's the one that runs
-    the real `docker-compose.yml` as-is — the same stack a developer
-    runs locally, not a parallel CI-only setup. WP-CLI (fetched fresh
-    into the container, not baked into the image) replaces the manual
-    "click through the install wizard" step from Setup Instructions with
-    `wp core install`/`wp plugin install --activate`/`wp theme activate`,
+    the real `docker-compose.yml` as-is — the same stack I run locally,
+    not a parallel CI-only setup. WP-CLI (fetched fresh into the
+    container, not baked into the image) replaces the manual "click
+    through the install wizard" step from Setup Instructions with `wp
+    core install`/`wp plugin install --activate`/`wp theme activate`,
     then `bin/seed.php` runs unmodified to produce the exact dataset the
     specs assert against.
 
 #### Security
 
-- **Two WordPress-core hardening measures found via a manual security
-  audit of the live deployment, not part of the brief.**
-  `Security\CoreHardening` restricts core's `GET /wp/v2/users` REST
-  route to authenticated requests (it exposes every user's login
-  username with no auth required by default — real ammunition for a
-  credential-stuffing attempt against `wp-login.php`, blocked here
-  rather than removed outright since logged-in admin screens
-  legitimately depend on it) and suppresses the `generator` meta tag
-  (advertises the exact WordPress version to any anonymous visitor).
-  Neither touches this plugin's own public `course-discovery/v1/*`
-  routes — `CoreHardeningIntegrationTest` proves both the restriction
-  and that it doesn't overreach into blocking them.
+- **Two WordPress-core hardening measures, found via a manual security
+  audit of the live deployment — not part of the brief.**
+  `Security\CoreHardening` restricts core's `GET /wp/v2/users` REST route
+  to authenticated requests (it exposes every user's login username with
+  no auth required by default — real ammunition for a credential-stuffing
+  attempt against `wp-login.php`, blocked here rather than removed
+  outright since logged-in admin screens legitimately depend on it) and
+  suppresses the `generator` meta tag (which advertises the exact
+  WordPress version to any anonymous visitor). Neither touches this
+  plugin's own public `course-discovery/v1/*` routes —
+  `CoreHardeningIntegrationTest` proves both the restriction and that it
+  doesn't overreach into blocking them.
 
 ## Performance & Scalability
 
-Not implemented for this exercise (explicitly out of scope per the brief),
-but documented here as the intended evolution path.
+Not implemented for this exercise — explicitly out of scope per the
+brief — but documented here as the intended evolution path.
 
 - **Expected bottlenecks.** `WP_Query` with multiple `meta_query`/
   `tax_query` clauses generates multi-way `JOIN`s against `wp_postmeta`,
-  which is an EAV-style table (`meta_key`/`meta_value` as `LONGTEXT`) — this
-  degrades fast as course count and filter combinations grow, well before
-  the low hundreds-of-thousands mark.
+  an EAV-style table (`meta_key`/`meta_value` as `LONGTEXT`). That
+  degrades fast as course count and filter combinations grow, well
+  before the low hundreds-of-thousands mark.
 - **Meta query limitations.** `wp_postmeta.meta_value` isn't indexed for
   range/equality comparisons beyond a shared `meta_key` index; ACF
   relationship/repeater fields are stored as serialized/CSV-ish meta,
-  meaning provider/instructor relationships often require `LIKE '%id%'`
-  matching rather than a real indexed join — this is the single biggest
+  meaning provider/instructor relationships often need `LIKE '%id%'`
+  matching rather than a real indexed join. This is the single biggest
   scaling risk for the Provider/Instructor/Category filters.
 - **Indexing considerations.** Beyond WordPress's default indexes, a
-  dedicated lookup/pivot table (e.g. `course_filter_index` with proper
+  dedicated lookup/pivot table (e.g. `course_filter_index`, with proper
   foreign keys and composite indexes on `(provider_id)`, `(location_id)`,
-  `(category_id)`, `(start_date)`) would let filtering happen via indexed
-  `JOIN`s instead of meta-value scans.
-- **Query performance.** Favour a small number of well-indexed joins over
-  compounding `meta_query` clauses; keep the query builder's output
-  inspectable/loggable so slow filter combinations are easy to spot in
-  development.
+  `(category_id)`, `(start_date)`) would let filtering happen via
+  indexed `JOIN`s instead of meta-value scans.
+- **Query performance.** Favour a small number of well-indexed joins
+  over compounding `meta_query` clauses; keep the query builder's output
+  inspectable/loggable so slow filter combinations are easy to spot
+  during development.
 - **Caching opportunities.** Filter *option lists* (available providers,
   locations, start dates, categories) change far less often than course
-  data and are prime candidates for object cache/transient caching;
-  popular/common filter-result sets can also be cached with an
-  invalidation hook on course save/delete.
-- **Pagination strategy.** Offset-based pagination (`WP_Query`'s default)
-  is adequate at moderate scale; at high volume, cursor/keyset pagination
-  (ordering by an indexed, unique column) avoids the increasing cost of
-  large `OFFSET`s.
+  data, and are prime candidates for object cache/transient caching;
+  popular filter-result sets could also be cached with an invalidation
+  hook on course save/delete.
+- **Pagination strategy.** Offset-based pagination (`WP_Query`'s
+  default) is fine at moderate scale; at high volume, cursor/keyset
+  pagination (ordering by an indexed, unique column) avoids the growing
+  cost of large `OFFSET`s.
 - **Search optimisation.** Plain-text search across name/short/long
-  description via `WP_Query`'s default `s` parameter uses `LIKE` matching
-  and doesn't scale or rank well. A MySQL `FULLTEXT` index on those columns
-  (via a denormalised read table, since core WP post tables aren't set up
-  for it) is a reasonable mid-scale step.
-- **Evolution path.** Roughly: (1) current — `tax_query` for categories,
-  in-PHP predicates over the full matching set for provider/location/
-  start date, fine at low volume; (2) **already built**: two denormalised
-  lookup tables (`course_discovery_course_providers`,
+  description via `WP_Query`'s default `s` parameter uses `LIKE`
+  matching and doesn't scale or rank well. A MySQL `FULLTEXT` index on
+  those columns (via a denormalised read table, since core WP post
+  tables aren't set up for it) is a reasonable mid-scale step.
+- **Evolution path.** Roughly: (1) current state — `tax_query` for
+  categories, in-PHP predicates over the full matching set for
+  provider/location/start date, fine at low volume; (2) **already
+  built**: two denormalised lookup tables
+  (`course_discovery_course_providers`,
   `course_discovery_course_start_dates`, see Architectural Decisions),
   kept in sync via `FilterIndexSync` on every save/delete — not yet
   wired into `CourseQueryBuilder` as the query source, so the next step
   is cutting the relevant filters over to indexed `JOIN`s against these
   tables once in-PHP filtering stops being fast enough, with the sync
-  itself already proven correct by
-  `FilterIndexSyncIntegrationTest`; (3) add caching around option lists
-  and common filter results; (4) once full-text relevance/ranking or
-  facet counts at scale become necessary (hundreds of thousands to
-  millions of courses), move search to an external engine (e.g.
-  Elasticsearch/OpenSearch or Algolia), with WordPress remaining the
-  system of record and the search index kept eventually consistent via
-  the same save/delete hooks.
+  itself already proven correct by `FilterIndexSyncIntegrationTest`;
+  (3) add caching around option lists and common filter results;
+  (4) once full-text relevance/ranking or facet counts at scale become
+  necessary (hundreds of thousands to millions of courses), move search
+  to an external engine (Elasticsearch/OpenSearch or Algolia, say), with
+  WordPress staying the system of record and the search index kept
+  eventually consistent via the same save/delete hooks.
 
 ## Assumptions Made
 
-- Local development only; the Docker Compose file and credentials in this
-  repo are not intended for production use.
-- The plugin targets PHP 8.2+ and WordPress 7.0+; no support for older
-  versions is assumed.
-- Domain logic lives in the plugin, not the theme; the theme is a thin
+- Local development only — the Docker Compose file and credentials in
+  this repo aren't intended for production use.
+- The plugin targets PHP 8.2+ and WordPress 7.0+; I'm not supporting
+  older versions.
+- Domain logic lives in the plugin, not the theme — the theme is a thin
   presentation layer.
 - "Dropdown combobox" (for Locations/Start Dates) is implemented as a
   `role="combobox"` trigger with a `role="listbox"` popup — not the
   WAI-ARIA "editable combobox with autocomplete" variant (a text input
   you type into to filter options), since neither field's option list is
-  large enough to need text filtering; this is the "select-only"
-  combobox shape, extended to multi-select. It's a JS-enhanced upgrade of
-  a working `<details>`/checkbox disclosure rather than a hand-built
-  widget from scratch — see the Design Decisions note above for why that
-  split (base markup that already works, JS enhances rather than
-  replaces) was chosen over building the widget as the only markup.
-  Typeahead-by-typing is implemented as a bonus (jumps to the next
-  option starting with the typed character), even though the brief
+  large enough to need text filtering. This is the "select-only"
+  combobox shape, extended to multi-select — a JS-enhanced upgrade of a
+  working `<details>`/checkbox disclosure rather than a hand-built
+  widget from scratch (see the Design Decisions note above for why that
+  split was worth it). Typeahead-by-typing is a bonus — jumps to the
+  next option starting with the typed character — even though the brief
   doesn't ask for it, since it falls out of the same keyboard handling
-  needed for arrow-key navigation.
+  arrow-key navigation already needed.
 - Visual styling (`assets/css/frontend.css`) follows an explicit
   direction: light/white background, one accent colour (Oxford blue
   `#002147`), system fonts only (no external font/CDN dependency, so the
   page renders identically offline) — a professional "university
   website" look rather than a developer-tool aesthetic.
-- All course prices are assumed to be a single currency (GBP). There's no
-  per-course or per-provider currency field anywhere in the data model —
-  `Price` (see Domain modelling under Design Decisions) already carries a
-  `currency` property/getter and formats accordingly, but nothing ever
-  passes a value other than its constructor default, so every course is
-  implicitly GBP today. Real multi-currency support (most naturally a
-  currency field on Provider, since that's usually where it actually
-  varies) would mean adding that ACF field and passing it through
-  `Course::fromPost()`, not changing `Price` itself. This is a different
-  axis from the brief's own price note ("designed to be extended to a
-  range or multiple price points") — that's one course, several prices;
-  this is one price, which currency.
+- All course prices are assumed to be a single currency (GBP). There's
+  no per-course or per-provider currency field anywhere in the data
+  model — `Price` (see Domain modelling under Design Decisions) already
+  carries a `currency` property/getter and formats accordingly, but
+  nothing ever passes a value other than its constructor default, so
+  every course is implicitly GBP today. Real multi-currency support
+  (most naturally a currency field on Provider, since that's usually
+  where it actually varies) would mean adding that ACF field and passing
+  it through `Course::fromPost()`, not changing `Price` itself. This is
+  a different axis from the brief's own price note ("designed to be
+  extended to a range or multiple price points") — that's one course,
+  several prices; this is one price, which currency.
 
 ## Development Log
 
 <details>
-<summary>Dated progress log — click to expand</summary>
+<summary>Condensed build history — click to expand</summary>
 
-- 2026-07-23 — Repository initialised; Docker Compose scaffolded
-  (WordPress 6.7/PHP 8.2, MySQL 8.0, phpMyAdmin on ports 8080/8081/3306).
-- 2026-07-23 — Plugin scaffold created at
-  `wp-content/plugins/course-discovery`: `composer.json` with PSR-4
-  autoloading (`OxfordInternational\CourseDiscovery\` → `src/`), main plugin
-  file with WordPress headers, and a `Plugin.php` bootstrap class wiring
-  `init` / `rest_api_init` / `plugins_loaded` hooks. Empty stub directories
-  created for `Domain/ValueObject`, `Domain/Model`, `Query`, `Filter`,
-  `PostType`, `Taxonomy`, `Migration`, `REST` — not yet implemented.
-- 2026-07-23 — Minimal companion theme scaffolded at
-  `wp-content/themes/course-discovery-theme` (`style.css`, `functions.php`,
-  `header.php`, `footer.php`, `index.php`).
-- 2026-07-23 — `db/` wired into the `db` service at
-  `/docker-entrypoint-initdb.d` for local SQL dump/import; dump files
-  gitignored.
-- 2026-07-23 — Docker stack started locally for verification.
-- 2026-07-23 — WordPress installed via the `/wp-admin/install.php` wizard;
-  **Course Discovery** plugin and **Course Discovery Theme** activated;
-  front end verified rendering under the new theme with no PHP errors in
-  the container logs.
-- 2026-07-23 — Domain layer implemented: `Domain/ValueObject` (`PostId`,
-  `Price`, `StartDate`, `Location`, `CategoryTerm`) and `Domain/Model`
-  (`Course`, `Instructor`, `Provider`), with `Course::locations()` deriving
-  and de-duplicating locations from its Providers. 30 unit tests added,
-  all passing with no WordPress bootstrap required.
-- 2026-07-23 — `course`, `instructor` and `provider` post types and the
-  hierarchical `course_category` taxonomy registered, each behind a
-  `PostTypeRegistrar`/`TaxonomyRegistrar` interface and filterable
-  (`course_discovery_post_types`/`course_discovery_taxonomies`) so new
-  post types/taxonomies can be added by a third party without editing
-  `Plugin.php`. Verified live: admin screens load, `post_type_exists()`/
-  `taxonomy_exists()` all return true, no PHP errors.
-- 2026-07-23 — Advanced Custom Fields (free edition) installed and
-  activated. `Field` namespace added: `CourseFieldGroup` (short
-  description, price, instructors, providers, start dates repeater) and
-  `ProviderFieldGroup` (location), registered in code via
-  `acf_add_local_field_group` on ACF's `acf/init` hook, filterable via
-  `course_discovery_field_groups`. Verified live: both field groups render
-  on the real Course/Provider "Add New" admin screens, no PHP errors.
-- 2026-07-23 — Added `bin/seed.php`, a repeatable dummy-data seeder
-  (6 Providers, 8 Instructors, 9 Categories in a two-level hierarchy, 16
-  Courses with varied prices/dates/multi-provider locations), tagged and
-  purge-before-reseed for idempotency. Verified end-to-end by reading
-  seeded Courses back through `Domain\Model\Course::fromPost()` — derived
-  multi-location logic, price formatting and chronological start dates all
-  correct. Also discovered and fixed a pre-existing issue: permalinks were
-  left on WordPress's default "Plain" structure from install, so the
-  `course`/`instructor`/`provider` archive URLs 404'd; set
-  `/%postname%/` and saved via Permalinks settings (flushing rewrite
-  rules from CLI didn't write `.htaccess` reliably — doing it through the
-  real admin form did).
-- 2026-07-23 — Upgraded the stack from WordPress 6.7 to **7.0.2**
-  (`wordpress:7.0.2-php8.2-apache`). Since the environment is fully
-  reproducible (scripted install + `bin/seed.php`), the whole stack was
-  reprovisioned from scratch (`docker compose down -v && up -d`) rather
-  than attempting a live core upgrade — reinstalled WordPress, reactivated
-  the plugin/theme/ACF, reseeded the dummy dataset. Verified: 30/30 tests
-  still pass, the `course`/`instructor`/`provider` post types, ACF field
-  groups and `/courses/` archive all work identically under 7.0.2, no PHP
-  errors or deprecation notices in the container logs. Also hit the same
-  "Plain" permalink default as the original install and fixed it the same
-  way (see the previous entry).
-- 2026-07-23 — Implemented the query builder and filter pipeline:
-  `Filter\FilterCriteria`, the `Filter` interface, five concrete filters
-  (search, provider, location, category, start date), `FilterPipeline`,
-  `Query\CourseQueryBuilder`, `CourseResultAssembler` and
-  `CourseSearchClause`. Category filtering pushes into a real `tax_query`;
-  Provider/Location/StartDate filter as in-PHP predicates over hydrated
-  `Course` objects instead of a `meta_query`, since ACF's serialized
-  storage for those fields isn't reliably `LIKE`/`IN`-matchable (see
-  Architectural Decisions). Added 25 unit tests (55/55 total, no
-  WordPress bootstrap needed even for the filter/AND-OR logic, since it's
-  tested against fabricated `Course` objects). Verified live against the
-  real seeded data: unfiltered listing paginates correctly (16 courses,
-  2 pages); category-only, combined AND-across-filters, and a
-  deliberately contradictory combination (expecting zero results) all
-  returned exactly the expected courses; confirmed the widened search
-  matches a term that exists *only* in a course's `short_description`
-  field (not title/content), proving `CourseSearchClause`'s join actually
-  extends WordPress's default search rather than just coincidentally
-  overlapping with it. No PHP errors in the container logs.
-- 2026-07-23 — Added the REST layer: `GET /wp-json/course-discovery/v1/
-  courses` (filtered, paginated search) and `.../filters` (available
-  option lists, derived from currently published courses, wiring up the
-  brief's "altering available filter options" extension point via
-  `course_discovery_filter_options` — the one hook missing after the
-  previous milestone). Added `CourseTransformer` for Course→JSON
-  serialisation and refactored `CourseQueryBuilder`/`CourseResultAssembler`
-  to share fetch logic between the paginated `execute()` and a new
-  `executeAll()`. 4 new unit tests (59/59 total). Verified live: an
-  unfiltered request paginates correctly; combined category+location
-  AND-filtering and a deliberately contradictory combination (expecting
-  zero) both behave correctly through the actual HTTP endpoint, not just
-  in-process; search still matches `short_description`-only text over
-  REST; `/filters` returns correct counts and chronologically-ordered
-  start dates. No PHP errors in the container logs.
-- 2026-07-23 — Built the frontend filter UI: `Frontend\
-  CourseArchiveTemplate` serves the plugin's own `templates/archive-
-  course.php` for `/courses/` via `template_include`, independent of the
-  active theme. The page reads filter selections from `$_GET` and
-  renders through the same `FilterCriteria`/`FilterPipeline`/
-  `CourseQueryBuilder` the REST API uses, so it filters correctly with
-  JavaScript entirely disabled; `assets/js/frontend.js` progressively
-  enhances it to fetch `course-discovery/v1/courses` and update the DOM
-  in place instead of reloading the page. `FilterFieldRenderer` renders
-  Providers/Locations/Categories/Start Dates as native `<details>`/
-  `<summary>` multi-select disclosures (see Design Decisions/Assumptions
-  for why, not a hand-built ARIA combobox). Extracted `FilterOptions
-  Provider` out of `FilterOptionsController` so the REST endpoint and the
-  server-rendered template compute option lists identically. Also took a
-  design pass on `assets/css/frontend.css`: a small catalog/card-index
-  visual motif (serif headings, monospace price/date "stamps", tab-
-  styled filter disclosures), system fonts only, dark-mode and
-  reduced-motion aware. Verified live: unfiltered and filtered page
-  loads both render correctly via plain GET (no-JS baseline), selected
-  filters persist as checked checkboxes and badge counts across a
-  request, CSS/JS assets load with no errors, full test suite still
-  59/59. Could not capture an automated screenshot in this environment
-  (Playwright's Chromium needs `libnspr4`, which needs root to install
-  and this environment has no passwordless sudo) — visual review was
-  done by request rather than by an automated check.
-- 2026-07-23 — Restyled the frontend on explicit direction: replaced the
-  earlier serif/monospace catalog motif with a light/white, professional
-  "university website" look — Oxford blue (`#002147`) as the single
-  accent colour, system fonts throughout (no monospace, no serif
-  display), white cards with a subtle border and hover shadow-lift,
-  filter dropdowns styled as plain form controls rather than coloured
-  pills, an explicit 3/2/1-column responsive grid, and a CSS-only search
-  icon (an inline SVG data URI as the input's `background-image`, so no
-  HTML changed). Also added a matching light-theme base (body font,
-  background, link colour) to `course-discovery-theme/style.css` for
-  whatever non-plugin pages the theme renders. No PHP, JS or HTML
-  structure changed — CSS only, per the request; verified no errors,
-  correct palette served, full suite still 59/59.
-- 2026-07-23 — Provisioned production server on my account at
-  courses.statichex.dev and deployed the site there. Verified live:
-  front end, admin, seeded data, REST endpoints and combined filtering
-  all match local behaviour.
-- 2026-07-23 — Moved the course listing to the site's front page (`/`)
-  instead of the Course post type's own archive URL (`/courses/`), which
-  now 301-redirects to `/` so there's one canonical URL rather than a
-  duplicate. Verified locally: `/` renders the listing, `/courses/`
-  redirects correctly, filtering still works at the new URL, full suite
-  still 59/59.
-- 2026-07-23 — Added the formal integration test suite: `wp-phpunit` +
-  `yoast/phpunit-polyfills`, bootstrapped against the plugin's own real
-  WordPress install (inside the container) and a dedicated
-  `wordpress_test` database. 20 tests across `FilterPipelineIntegrationTest`,
-  `CourseQueryBuilderIntegrationTest`, `RestEndpointIntegrationTest` and
-  `StartDateFilterIntegrationTest`, each creating its own fixtures.
-  Downgraded PHPUnit from 10 to 9.6 project-wide — `wp-phpunit` 7.0.2
-  calls a `PHPUnit\Util\Test` method PHPUnit 10 removed, and 9.6 is what
-  the wp-phpunit/polyfills combination actually supports; the existing
-  59 unit tests needed no changes and still pass.
-  **Found and fixed a real bug in the process:** `CourseSearchClause`
-  guarded its `add_filter()` calls with a "register once" static flag,
-  correct for a normal request but wrong under `WP_UnitTestCase`, which
-  snapshots and restores the hooks table between every test — after the
-  first test registered the filter, the guard silently skipped
-  re-registering it once the table was reset, so the search-widening
-  filter quietly stopped working for every test after the first. Removed
-  the guard (WordPress's `add_filter()` already dedupes identical
-  callback+priority registrations, so there's no double-execution risk).
-  Full suite: 59 unit + 20 integration, all passing.
-- 2026-07-23 — Added migrations/custom DB tables: `MigrationRunner` +
-  `CreateFilterIndexTables` (two lookup tables — `course_discovery_
-  course_providers`, `course_discovery_course_start_dates` — deliberately
-  two focused junction tables rather than one wide cross-product table;
-  see Architectural Decisions), kept in sync via `FilterIndexSync` on
-  `save_post_course`/`before_delete_post`. Not yet wired into
-  `CourseQueryBuilder` as a query source — see Performance & Scalability's
-  evolution path for why. Added 3 unit tests (pure row-computation) and 5
-  integration tests (table creation, sync on publish/re-save/delete/
-  unpublish). Found a real gap while verifying live: ACF's `update_field()`
-  writes postmeta directly and never fires `save_post_course`, so
-  `bin/seed.php`'s courses never reached the sync — fixed by adding a
-  `wp_update_post()` call after each course's fields are set. Verified
-  live: both tables populate correctly (20 provider rows, 22 start-date
-  rows across 16 reseeded courses), no errors. Full suite: 62 unit + 25
-  integration, all passing.
-- 2026-07-23 — Added the Playwright e2e suite (13 tests across
-  `keyboard-operability`, `combobox-filters`, `filter-narrows-results` —
-  see Testing Instructions). Getting a browser running at all in this
-  sandboxed session needed a workaround: Chromium needs
-  `libnspr4`/`libnss3`, which need root to install and
-  there's no passwordless sudo here, so I extracted the `.deb` packages
-  manually and pointed `LD_LIBRARY_PATH` at them. That got a browser
-  launching, but only stably under `--single-process --no-zygote` flags
-  — real navigation confirmed real rendering (a full-page screenshot of
-  the redesigned frontend came back correctly). Running the actual test
-  *suite* under those same flags was unreliable: `--single-process`
-  breaks Playwright's `.click()` actionability/stability checks and
-  degrades after several sequential browser contexts, so 9 of 13 tests
-  timed out or hit "browser has been closed" — an environment artifact,
-  not a site bug. Confirmed this directly: replacing `.click()` with
-  `.dispatchEvent('click')` in an ad-hoc diagnostic made the identical
-  interaction succeed in 4 seconds. The 4 tests using `.focus()` +
-  `page.keyboard` (no `.click()` at all) passed cleanly first try. The
-  committed spec files use standard, idiomatic Playwright `.click()` —
-  correct for any normally-provisioned environment — rather than being
-  rewritten around this session's specific limitation. **Not verified as
-  a full clean run in this session**; needs running for real on a
-  machine (or CI) where `npx playwright install --with-deps` can
-  actually install its system dependencies.
-- 2026-07-24 — Did a meticulous pass over the task brief against the
-  actual implementation, rather than just re-reading prose. Found and
-  fixed three real issues:
-  - Two false claims in this README ("a generic contract test suite runs
-    against every registered filter" and "run in CI on every change" —
-    neither was ever built) and one leaked internal note-taking artifact.
-  - **None of the five extensibility hooks the brief names as examples
-    had any test proving a third party could actually use them** —
-    despite all five being wired into real code. Added
-    `ExtensibilityHooksIntegrationTest`: a real `add_filter()` callback
-    against each of `course_discovery_filters`, `course_discovery_query_args`,
-    `course_discovery_order_courses`, `course_discovery_transform_criteria`,
-    and `course_discovery_filter_options`, confirming the resulting
-    behaviour actually changes. All five passed first try.
-  - **A real production bug**: the `start_dates` ACF field had no format
-    enforcement at all — an admin typo (or any non-admin-form write,
-    since ACF's own `update_field()` bypasses form validation too) would
-    throw an uncaught exception in `Course::hydrateStartDates()`,
-    fatal-erroring every page that lists courses. Fixed with two layers:
-    `Field\CourseFieldGroup::validateStartDate()` rejects malformed input
-    at the real admin form via `acf/validate_value`; `Course::fromPost()`
-    now also catches and skips (logging why) a malformed value from any
-    other source, so one bad row can degrade gracefully instead of
-    taking the whole site down.
-  - Also verified directly (not just claimed): exactly the two allowed
-    plugins (ACF + Course Discovery) are active on both local and
-    production, every public method/property in `src/` is typed (a full
-    grep audit, zero gaps), and the Categories taxonomy meta box
-    genuinely renders on the Course edit screen.
-  - Re-attempted a clean e2e run with an isolated single-spec-file
-    invocation to rule out cross-file interference; got the same
-    "browser closed" pattern on a near-identical Space-key test right
-    after an Enter-key test passed — reconfirms this is the
-    `--single-process` environment artifact already documented, not a
-    fresh finding, so did not keep chasing it further.
-  - Full suite: 69 unit + 32 integration, all passing.
-- **Not yet done:** nothing outstanding from the brief's testing
-  requirements — the e2e suite is written and partially verified; a full
-  clean run needs a normally-provisioned environment outside this
-  sandboxed session (see above).
-- 2026-07-25 — Committed prior session's uncommitted work-in-progress as
-  two separate, logically-scoped commits (it had been left staged across
-  a session boundary): PHPStan (level 8, WordPress/ACF Pro stubs) plus
-  the two real type gaps it caught, and the `Admin\CourseListTable`
-  wp-admin columns feature with its integration test. `composer test`
-  (69/69) and `composer stan` (clean) both re-verified before committing.
-  Production HTTPS (`courses.statichex.dev`) was already fixed and
-  documented as of 2026-07-25 — see Production Deployment above; nothing
-  further needed there this session.
-- 2026-07-25 — Reworked the Locations/Start Dates filters from a plain
-  `<details>` disclosure into a real ARIA combobox: added
-  `assets/js/combobox.js`, which progressively enhances
-  `FilterFieldRenderer`'s existing markup into a `role="combobox"`/
-  `role="listbox"` widget (arrow keys, Home/End, typeahead, Space to
-  toggle without closing, Escape to close and refocus) using
-  `aria-activedescendant` rather than moving real focus into the list —
-  see Architectural Decisions and Assumptions Made above for the design
-  and why Providers/Categories were deliberately left as the plain
-  disclosure. The original checkboxes are hidden, not removed, so the
-  same `name[]` values still submit correctly with this script disabled.
-  Rewrote `combobox-filters.spec.js` against the new ARIA contract
-  (`aria-expanded`, `aria-activedescendant`, `role="option"`, and an
-  explicit assertion that the hidden checkbox — not just the visible
-  widget — carries the selection), and updated the two other e2e specs
-  that interacted with Locations' old checkbox markup directly
-  (`filter-narrows-results.spec.js`) or asserted on it as the
-  keyboard-operability baseline (`keyboard-operability.spec.js`, moved
-  to target Providers instead, since that filter is intentionally
-  unchanged). `composer test` (69/69) and `composer stan` (clean) both
-  re-verified. **Not run this session**: same Docker/Playwright
-  limitation as the original e2e suite (see above) — this sandboxed
-  session has no `docker` binary available at all this time (WSL
-  integration not active), so neither a live browser check nor an
-  actual Playwright run against a running instance was possible; the
-  new/changed specs need a real run before being trusted, same as the
-  rest of the e2e suite.
-- 2026-07-25 — Got a real Playwright run: Docker Desktop's WSL integration
-  setting already listed this distro as integrated, but the CLI symlinks
-  had never actually been installed into it — `docker desktop restart`
-  (the supported fix) hung mid-stop, so its processes were force-killed
-  and it was relaunched fresh, which resolved it (`docker`/`docker
-  compose` both now work natively in this WSL distro, no more Windows-
-  path workaround). Brought the existing stack back up
-  (`docker compose up -d` against the existing volumes — no
-  reprovisioning needed) and confirmed the bind mounts were healthy (see
-  the known flakiness note in Architectural Decisions/dev notes) before
-  trusting anything. Headless Chromium was still missing `libnspr4`/
-  `libnss3` system libraries in this WSL distro (this session had no
-  passwordless sudo); installed via `sudo apt-get install -y libnspr4
-  libnss3` (not `libnssutil3` — that `.so` ships inside the `libnss3`
-  package itself, there's no separate Ubuntu package by that name).
-  **All 17 e2e tests passed on a real run** (`combobox-filters.spec.js`'s
-  8 tests against the new ARIA widget, `filter-narrows-results.spec.js`'s
-  4, `keyboard-operability.spec.js`'s 5) — confirming the combobox rework
-  actually works in a real browser, not just on inspection. Also
-  re-ran everything else for a fully green board in one pass: 69 unit +
-  37 integration (`wordpress_test` DB created fresh) + PHPStan, all
-  clean. Nothing outstanding from the brief's testing requirements
-  remains unverified.
-- 2026-07-25 — Added `.github/workflows/ci.yml` (see Architectural
-  Decisions for the job design) and pushed it three times, watching each
-  real run with `gh run watch` rather than trusting the YAML on
-  inspection — the same standard applied to the local test suite
-  earlier. Found and fixed two real bugs this way, neither of which was
-  a CI-authoring mistake:
-  1. `bin/seed.php` hard-requires the plugin's own `vendor/autoload.php`
-     (unlike the main plugin bootstrap, which checks `file_exists()`
-     first and degrades quietly) — the `e2e` job wasn't running
-     `composer install` before starting the stack, so the bind-mounted
-     `vendor/` didn't exist and seeding fatal-errored.
-  2. A genuine, previously-undiscovered production bug in
-     `assets/js/frontend.js`: `fetchAndRender()` built its request URL
-     as `restUrl + 'courses?' + params`, correct only when `rest_url()`
-     returns a bare path (pretty permalinks). Under WordPress's default
-     "Plain" permalink structure — what a fresh install starts on, and
-     what every environment this suite had run against before today
-     already had changed away from — `rest_url()` returns a URL that
-     already carries `?rest_route=...`, so the extra `courses?` produced
-     a second `?` and every filtered/paginated request 404'd
-     (`rest_no_route`), silently, since the fetch chain had no
-     `.catch()`. Reproduced it directly (confirmed via `curl` that the
-     exact malformed URL the old code built really did 404) against a
-     second, disposable Docker Compose stack (`-p cd-ci-repro`, remapped
-     ports, provisioned via WP-CLI exactly like the CI job — chosen over
-     guessing through further CI round-trips) before fixing it with a
-     proper `URL`/`URLSearchParams`-based merge and confirming all 17
-     e2e tests pass against that same fresh, Plain-permalink instance.
-  All three jobs (`quality`, `integration`, `e2e`) are green on a real
-  run as of this entry, not just "should work."
-- 2026-07-25 — Addressed two findings from the earlier architecture
-  review: the archive template's redundant double course-query, and the
-  duplicated/incomplete course-card markup. Added
-  `FilterCriteria::isEmpty()` and an optional pre-fetched `list<Course>`
-  parameter on `FilterOptionsProvider::compute()` (also fixed a latent
-  bug found while adding its first unit test: `compute()` called
-  `apply_filters()` unconditionally, which would fatal outside a
-  WordPress bootstrap) so `templates/archive-course.php` fetches/hydrates
-  the course list once instead of twice when no filter is selected — see
-  Architectural Decisions for why that reuse is only valid in that
-  specific case, not in general. Added Providers/Instructors (already in
-  `CourseTransformer`'s REST payload, just never shown on the card) to
-  both `course-card.php` and `frontend.js`'s `courseCardHtml()`, and
-  added `card-rendering-parity.spec.js` so the two renderers' field
-  lists can't silently drift apart again. 8 new unit tests (77 total) +
-  2 new e2e tests (19 total); re-ran the full suite for real (77 unit +
-  37 integration + 19 e2e + PHPStan) rather than trusting it on
-  inspection — all green, no PHP errors in the container logs.
-- 2026-07-25 — Deployed the 13 commits accumulated above to production
-  (`git pull` + `composer install --no-dev` + rsync into `public_html`,
-  per the redeploy process — verified via `diff -rq` against the git
-  checkout, not just assumed). Also removed `litespeed-cache`, a third
-  active plugin found on the production account alongside ACF and this
-  plugin (the brief requires no external plugins except ACF) — its
-  removal also purged a stale full-page cache that had been masking the
-  deploy. Then found HTTPS was broken again: cPanel's AutoSSL feature is
-  disabled at the hosting-package level, and — new information — the
-  Namecheap-support fix from earlier this same day hadn't actually
-  lasted. Worse than "HTTPS down, HTTP still works": `.dev` is
-  HSTS-preloaded in every major browser, so the site was unreachable by
-  any real visitor, full stop. Fixed it for real and durably this time:
-  installed `acme.sh` under the account's home directory (no root
-  needed), issued a cert via HTTP-01 webroot validation, and installed
-  it via `uapi SSL install_ssl` — a separate API from the gated AutoSSL
-  feature, unaffected by that restriction — then wired up a reload hook
-  + cron job so future renewals install themselves automatically,
-  independent of AutoSSL ever working again. Verified with the actual
-  Playwright suite against `https://courses.statichex.dev` over a real
-  HTTPS connection: 19/19 passing. (One follow-up wrinkle: chased a
-  theory that the issued cert's newer root chain — `ISRG Root X2`/"Root
-  Y*", introduced 2026-05-13 — might not yet be trusted by some mobile
-  OS trust stores, after a phone report of the site not loading;
-  reissuing as RSA landed on the same new root hierarchy, and the
-  original chain does properly cross-sign back to the long-trusted
-  `ISRG Root X1`, so left it as originally issued rather than chase
-  further — the phone issue turned out to be transient and resolved on
-  its own.)
-- 2026-07-25 — Ran a manual security audit (not part of the brief) since
-  a real production deployment now existed: SQL/XSS/input-handling in
-  the plugin's own code, then the live server's real-world exposure.
-  Plugin code came back clean (parameterised queries throughout,
-  consistent output escaping, `$_GET` always
-  `wp_unslash()`+sanitised, no `eval`/`exec`/`unserialize` anywhere,
-  ABSPATH/`PHP_SAPI` guards verified live, `composer audit` clean).
-  Found two real, fixable issues on the live site, both WordPress-core
-  defaults rather than anything in this plugin: core's REST API exposes
-  every user's login username with no auth required
-  (`GET /wp/v2/users`), and the `generator` meta tag advertises the
-  exact WordPress version. Added `Security\CoreHardening` to fix both —
-  restricts the users route to authenticated requests (verified a
-  logged-in admin can still use it, and that this plugin's own public
-  routes are unaffected) and suppresses the generator tag — with a unit
-  test for the pure route-matching logic and an integration test
-  proving the actual REST/`wp_head` behaviour changed. 83 unit + 41
-  integration, all passing, verified against the real local site over
-  HTTP (not just `WP_UnitTestCase`) before considering it done.
+### Scaffolding
+
+Docker Compose (WordPress, MySQL, phpMyAdmin), plugin skeleton (PSR-4
+under `OxfordInternational\CourseDiscovery\`), and a minimal companion
+theme. WordPress installed, plugin/theme activated, ACF installed as the
+one allowed external plugin.
+
+### Domain layer
+
+`Domain/ValueObject` (`PostId`, `Price`, `StartDate`, `Location`,
+`CategoryTerm`) and `Domain/Model` (`Course`, `Instructor`, `Provider`),
+with `Course::locations()` deriving and de-duplicating locations from
+Providers rather than storing them independently. `course`/`instructor`/
+`provider` post types and the hierarchical `course_category` taxonomy
+registered behind filterable registrar interfaces
+(`course_discovery_post_types`/`course_discovery_taxonomies`). ACF field
+groups (`CourseFieldGroup`, `ProviderFieldGroup`) registered in code, not
+left as UI-only config. `bin/seed.php` added as a repeatable, idempotent
+dummy-data generator (tag-and-purge-before-reseed) rather than a shipped
+SQL dump, so the same dataset reproduces on any environment.
+
+### Query, filter pipeline, REST, frontend
+
+`Filter\FilterCriteria` plus one class per filter (search, provider,
+location, category, start date) behind a shared `Filter` interface,
+composed by `FilterPipeline`. Categories push down into a real
+`tax_query` (an indexed taxonomy join); Provider/Location/StartDate
+filter as in-PHP predicates over hydrated `Course` objects, since ACF's
+serialized storage for those fields isn't reliably `meta_query`-matchable
+— matching against typed, already-parsed domain objects removes that
+ambiguity. `CourseQueryBuilder` abstracts `WP_Query` entirely; a REST
+layer (`GET /courses`, `GET /filters`) and a server-rendered,
+progressively-enhanced frontend (`$_GET` → same filter pipeline → same
+results the REST API returns, with `assets/js/frontend.js` only
+replacing the full-page reload with a `fetch`) both consume it, so
+there's one source of truth for "what matches." Native
+`<details>`/checkbox disclosures for all four multi-selects, keyboard-
+operable and JS-optional by construction.
+
+Deployed to production at `courses.statichex.dev` (shared cPanel
+hosting, no Docker) — same codebase, plugin/theme, and seeder.
+
+### Testing infrastructure
+
+A `WP_UnitTestCase` integration suite (`wp-phpunit` +
+`yoast/phpunit-polyfills`, against the plugin's real WordPress install)
+alongside the WordPress-independent unit suite, migrations/custom DB
+tables (`MigrationRunner`, two denormalised lookup tables kept in sync by
+`FilterIndexSync` on save/delete — not yet wired into the query builder,
+documented as the scale-evolution path), and a Playwright e2e suite
+(keyboard operability, combobox behaviour, filter narrowing).
+
+**Real bugs this layer caught, not just inspection:** a "register once"
+static guard on `CourseSearchClause`'s hooks silently broke under
+`WP_UnitTestCase`'s hooks-table reset between tests (removed the guard —
+`add_filter()` already dedupes); ACF's `update_field()` bypasses
+`save_post_course` entirely, so the seeder's courses never reached the
+lookup-table sync until a `wp_update_post()` call was added; getting a
+real browser running in a constrained sandbox needed a manual
+`libnspr4`/`libnss3` workaround, and `--single-process` Chromium flags
+made `.click()` unreliable there specifically (confirmed as an
+environment artifact, not a site bug, by swapping in
+`.dispatchEvent('click')` as a diagnostic) — the committed specs use
+idiomatic Playwright throughout regardless.
+
+### Brief-compliance review
+
+A deliberate line-by-line pass of the actual implementation against the
+brief — not just re-reading prose — found and fixed three real issues:
+two false claims that had crept into this README, **none of the five
+named extensibility hook examples had a test actually proving a third
+party could use them** (added `ExtensibilityHooksIntegrationTest`, a
+real `add_filter()` against each), and **a real production bug** — the
+`start_dates` ACF field had no format enforcement, so a typo (or any
+non-admin-form write) would fatal-error every page listing courses.
+Fixed with two layers: `acf/validate_value` rejects malformed input at
+entry, and `Course::fromPost()` also catches and skips a malformed value
+already in the database, logging why, rather than taking the whole site
+down.
+
+### Tooling, admin dashboard, accessibility rework
+
+PHPStan (level 8, WordPress/ACF Pro stubs) added as a second static
+gate, catching two real type gaps (`array_map()` silently losing
+`list<>` shape without `array_values()`, and `CourseQueryBuilder`
+assuming `WP_Query::$posts` is always `WP_Post[]`, not true once a third
+party's `course_discovery_query_args` hook sets `fields => 'ids'`). The
+wp-admin Courses list table gained Price/Providers/Locations/Start Dates
+columns (reusing `Course::fromPost()`, so it can't drift from the REST
+API/frontend), with a numeric, not lexical, price sort.
+
+Locations and Start Dates (the two filters the brief specifically names
+as needing a "dropdown combobox") were reworked from a plain `<details>`
+disclosure into a real ARIA `role="combobox"`/`role="listbox"` widget —
+arrow keys, Home/End, typeahead, `aria-activedescendant` tracking — as a
+progressive JS enhancement over markup that still works with JavaScript
+disabled. Providers/Categories deliberately kept as the plain
+disclosure, since the brief only requires multi-select for those two.
+
+### CI pipeline
+
+Three jobs (`quality`: unit + PHPStan, pure PHP; `integration`: real
+`WP_UnitTestCase` against a plain downloaded WordPress core + ACF zip, no
+live install needed; `e2e`: the actual `docker-compose.yml` stack,
+provisioned via WP-CLI, seeded, driven by Playwright). Pushed and
+watched three real runs rather than trusting the YAML on inspection —
+caught two genuine bugs this way: the `e2e` job wasn't running `composer
+install` before starting the stack, so the bind-mounted `vendor/` didn't
+exist and seeding fatal-errored; and a **real, previously-undiscovered
+production bug** in `frontend.js` — its filter/pagination fetch built a
+URL assuming `rest_url()` never carries its own query string, which is
+false under WordPress's default "Plain" permalink structure (every
+environment this suite had run against before had already changed away
+from that default), silently 404ing every filtered request. Reproduced
+on a disposable second Docker stack before fixing it with a proper
+`URL`/`URLSearchParams` merge.
+
+### Architecture polish
+
+Closed two findings from a full architecture self-review: the archive
+template ran two independent full course queries per page view (one for
+results, one for filter options) even though they're identical whenever
+no filter is selected — `FilterCriteria::isEmpty()` now lets the
+template fetch once and derive both from it, only in that specific case.
+Course cards (server-rendered PHP partial vs. client-rendered JS
+template) never showed Providers/Instructors despite both already being
+in the REST payload — added to both renderers, plus an e2e test
+asserting the two field lists can't silently drift apart again.
+
+### Production sync, SSL, and a security audit
+
+Deployed the accumulated commits to production and removed a third
+active plugin (`litespeed-cache`) found there — the brief requires no
+external plugins besides ACF. Found HTTPS broken again: cPanel's
+AutoSSL feature is disabled at the hosting-package level, and even a
+prior support-assisted fix hadn't lasted. Fixed it durably with a
+self-managed Let's Encrypt certificate (`acme.sh`, HTTP-01 webroot
+validation, installed via a separate cPanel API unaffected by the
+AutoSSL restriction) plus an automatic reload hook and renewal cron —
+verified against the live site over real HTTPS with the actual
+Playwright suite, not just curl. (`.dev` domains are hardcoded into
+every major browser's HSTS-preload list, so a broken cert there means
+the site is unreachable by any real visitor, not just "HTTPS down, HTTP
+still works.")
+
+A manual security audit — not part of the brief — of both the plugin
+code and the live deployment's real-world exposure came back clean on
+the plugin side (parameterised SQL throughout, consistent output
+escaping, sanitised input, no `eval`/`exec`/`unserialize`, `composer
+audit` clean), but found two real WordPress-core-default issues on the
+live site: `GET /wp/v2/users` exposes every login username with no
+authentication required, and the `generator` meta tag discloses the
+exact WordPress version. Fixed both (`Security\CoreHardening`), verified
+the fix doesn't overreach into blocking this plugin's own public
+routes, and deployed to production the same way.
+
+**Current totals:** 83 unit + 41 integration + 19 e2e tests, PHPStan
+level 8 clean, three-job CI green on every push.
 
 </details>
